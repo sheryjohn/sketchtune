@@ -452,7 +452,7 @@ function shapePts(name,size,center){
 }
 const shWrap=$('shapes');
 Object.entries(SHAPES).forEach(([k,s])=>{ const b=document.createElement('button'); b.title=k; b.setAttribute('aria-label',k+' shape'); b.dataset.shape=k;
-  b.innerHTML='<svg viewBox="0 0 24 24"><path d="'+s.d+'"/></svg>'; b.onclick=()=>{ state.shape=k; setTool('shape'); toast(k+' · tap the canvas to place'); }; shWrap.appendChild(b); });
+  b.innerHTML='<svg viewBox="0 0 24 24"><path d="'+s.d+'"/></svg>'; b.onclick=()=>{ if(state.tool==='shape'&&state.shape===k){ setTool('pen'); toast('Back to pencil'); return; } state.shape=k; setTool('shape'); toast(k+' · tap the canvas to place, tap the shape again for pencil'); }; shWrap.appendChild(b); });
 $('sizes').querySelectorAll('button').forEach(b=>b.onclick=()=>{ state.size=+b.dataset.size; $('sizes').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); if(state.tool!=='shape') setTool('shape'); });
 
 // ---------- rendering ----------
