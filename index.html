@@ -70,6 +70,24 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .form input,.form select{font:inherit;font-size:14px;color:var(--ink);background:var(--chip);border:1.5px solid var(--chip-border);border-radius:10px;padding:8px 10px;outline:none;width:100%;box-sizing:border-box}
 .form input:focus-visible,.form select:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .status{font-size:12px;color:var(--ink-2)}
+.gal-top{display:flex;flex-direction:column;gap:8px}
+.gal-top input{font:inherit;font-size:14px;color:var(--ink);background:var(--chip);border:1.5px solid var(--chip-border);border-radius:999px;padding:0 12px;height:38px;outline:none;min-width:0;flex:1}
+.gal-top input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.prompt{display:flex;align-items:center;gap:8px;background:var(--chip);border:1.5px dashed var(--chip-border);border-radius:14px;padding:8px 12px;font-size:13px}
+.prompt b{font-weight:600}
+.prompt .spacer{flex:1}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.card{background:var(--chip);border:1.5px solid var(--chip-border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.card img{display:block;width:100%;aspect-ratio:8/5;object-fit:cover;background:var(--paper-2);border-bottom:1.5px solid var(--chip-border)}
+.card .body{padding:8px 10px;display:flex;flex-direction:column;gap:3px}
+.card .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .m{font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .acts{display:flex;gap:4px;padding:0 6px 8px;align-items:center}
+.card .acts button{height:30px;min-width:30px;padding:0 8px;font-size:12px;gap:4px}
+.card .acts button svg{width:14px;height:14px}
+.card .acts .like.on{color:#e23d2e;border-color:#e23d2e;background:var(--chip)}
+.card .acts .spacer{flex:1}
+@media (max-width:899px){ .cards{grid-template-columns:repeat(2,1fr)} }
 .row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
 .row.between{justify-content:space-between}
 .grp{display:flex;gap:6px;align-items:center}
@@ -135,6 +153,7 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
 .genres button{height:30px;min-width:0;padding:0 11px;font-size:13px;flex:0 0 auto}
 .toast{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--chip-on);color:var(--chip-on-ink);padding:6px 12px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
+@media (max-width:420px){ .tabs button span{display:none} }
 @media (max-width:380px){ button{height:34px;min-width:34px} .sw,.sw.on{width:26px;height:26px;min-width:26px} .keys{width:126px;min-width:126px} .tabs button span{display:none} }
 @media (max-width:899px){
   .app{padding:6px 10px 6px;gap:6px}
@@ -182,6 +201,7 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
       <button role="tab" data-tab="pattern"><svg viewBox="0 0 24 24"><path d="M4 6h16 M4 12h10 M4 18h13"/></svg><span>Pattern</span></button>
       <button role="tab" data-tab="ai"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 6.3L21 11l-6.8 1.7L12 21l-2.2-8.3L3 11l6.8-1.7z"/></svg><span>AI</span></button>
       <button role="tab" data-tab="export"><svg viewBox="0 0 24 24"><path d="M12 4v11 M7 10l5 5 5-5 M4 19h16"/></svg><span>Export</span></button>
+      <button role="tab" data-tab="gallery"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z M4 15l5-5 4 4 3-3 4 4"/></svg><span>Gallery</span></button>
     </nav>
 
     <div class="pages">
@@ -278,6 +298,21 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
         </div>
       </section>
 
+      <section class="page" data-page="gallery">
+        <div class="prompt" id="promptBox"><span>Today's prompt: <b id="promptText"></b></span><span class="spacer"></span><button id="promptOnly" class="text" style="height:28px;font-size:12px">Today only</button></div>
+        <div class="gal-top">
+          <div class="row"><input id="galTitle" placeholder="Title for your sketch" maxlength="60"><input id="galAuthor" placeholder="Your name" maxlength="24" style="flex:0 1 130px"></div>
+          <div class="row">
+            <button id="galPublish" class="text"><svg viewBox="0 0 24 24"><path d="M12 19V5 M6 11l6-6 6 6"/></svg>Publish to gallery</button>
+            <span class="spacer"></span>
+            <div class="seg small" id="galSort"><button data-s="new" class="on">New</button><button data-s="top">Top</button></div>
+          </div>
+          <div class="note" id="galNote"></div>
+        </div>
+        <div class="cards" id="cards"></div>
+        <div class="row" style="justify-content:center"><button id="galMore" class="text" hidden>Load more</button></div>
+      </section>
+
       <section class="page" data-page="export">
         <div class="row wrap">
           <button id="expAudio" class="text" title="Render the loop to audio"><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12 M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M19 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/></svg>Audio</button>
@@ -294,6 +329,11 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
 (() => {
 'use strict';
 // ---------- state ----------
+// ---------- gallery backend ----------
+// Fill these in from your Supabase project (Project settings → API) and run supabase.sql once. Leave empty to hide publishing.
+const GALLERY_URL = 'https://phdxiuzuqtypfsdbebdi.supabase.co';
+const GALLERY_ANON_KEY = 'sb_publishable_a_ZT56CcV0vgwhqEO6i79g_FCkqaHwh';
+
 const COLORS = ['#1fa66a','#e23d2e','#6f5cf1','#f0a21b','#1e58c9','#e2439b','#5db3f0','#141a21'];
 const GENRES = {
   pop:     ['pluck','bell','pad','acoustic','bass','lead','chime','kick'],
@@ -981,9 +1021,10 @@ function unpackState(b){
 async function deflate(bytes){ if(!window.CompressionStream) return null; try{ const cs=new CompressionStream('deflate-raw'); const w=cs.writable.getWriter(); w.write(bytes); w.close(); const buf=await new Response(cs.readable).arrayBuffer(); return new Uint8Array(buf); }catch(e){ return null; } }
 async function inflate(bytes){ const ds=new DecompressionStream('deflate-raw'); const w=ds.writable.getWriter(); w.write(bytes); w.close(); return new Uint8Array(await new Response(ds.readable).arrayBuffer()); }
 async function shareCode(){ const raw=packState(); const z=await deflate(raw); return (z&&z.length<raw.length)?'sz'+b32enc(z):'sr'+b32enc(raw); }
+async function loadCode(h){ if(!/^s[rz][a-z2-7]+$/.test(h)) throw new Error('bad code'); let bytes=b32dec(h.slice(2)); if(h[1]==='z') bytes=await inflate(bytes); unpackState(bytes); }
 async function loadFromHash(){
   const h=location.hash.replace('#',''); if(!/^s[rz][a-z2-7]+$/.test(h)) return false;
-  try{ let bytes=b32dec(h.slice(2)); if(h[1]==='z') bytes=await inflate(bytes); unpackState(bytes); toast('Opened shared sketch'); return true; }catch(e){ console.error(e); toast('Could not open that link'); return false; }
+  try{ await loadCode(h); toast('Opened shared sketch'); return true; }catch(e){ console.error(e); toast('Could not open that link'); return false; }
 }
 $('share').onclick=async()=>{
   const code=await shareCode(); const url=location.origin+location.pathname+'#'+code;
@@ -992,6 +1033,71 @@ $('share').onclick=async()=>{
   catch(e){ try{ if(navigator.share){ await navigator.share({title:'Sketchtune',url}); return; } }catch(e2){} window.prompt('Copy this link',url); }
 };
 window.addEventListener('hashchange',()=>{ loadFromHash(); });
+
+// ---------- gallery: publish, browse, like, remix ----------
+const PROMPTS=['rain on a window','your morning coffee','a city at night','something that makes you laugh','the sea','a cat being dramatic','a mountain road','your favourite snack','a thunderstorm','a slow Sunday','the first day of school','a robot learning to dance','a lighthouse','a train leaving','fireworks','a garden in spring','your pet','a rocket launch','a quiet library','a birthday cake','fog in the hills','a heartbeat','a bicycle ride','a paper boat','autumn leaves','a crowded market','a secret','a lullaby','the desert at noon','a staircase'];
+function todaysPrompt(){ const d=new Date(); const day=Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/864e5); return PROMPTS[day%PROMPTS.length]; }
+$('promptText').textContent=todaysPrompt();
+const gal={configured:!!(GALLERY_URL&&GALLERY_ANON_KEY),sort:'new',promptOnly:false,page:0,items:[],liked:new Set()};
+try{ gal.liked=new Set(JSON.parse(localStorage.getItem('sketchtune:liked')||'[]')); }catch(e){}
+try{ $('galAuthor').value=localStorage.getItem('sketchtune:author')||''; }catch(e){}
+function galHeaders(){ const h={'apikey':GALLERY_ANON_KEY,'Content-Type':'application/json'}; if(GALLERY_ANON_KEY.startsWith('eyJ')) h['Authorization']='Bearer '+GALLERY_ANON_KEY; return h; } // legacy anon JWTs also go in Authorization; publishable keys use apikey only
+async function galFetch(path,opt){ const res=await fetch(GALLERY_URL+'/rest/v1/'+path,Object.assign({headers:galHeaders()},opt||{})); if(!res.ok){ let m=res.status+' '+res.statusText; try{ const j=await res.json(); m=j.message||j.hint||m; }catch(e){} throw new Error(m); } const t=await res.text(); return t?JSON.parse(t):null; }
+function galError(e){ const m=String(e&&e.message||e); if(/Failed to fetch|NetworkError|Load failed/i.test(m)) return gal.configured?'Could not reach the gallery. On the claude.ai preview outside requests are blocked; on your own site check the URL and key.':'Gallery is not connected yet.'; return 'Gallery error: '+m.slice(0,120); }
+function thumbnail(){ const tw=320, th=200; const c=document.createElement('canvas'); c.width=tw; c.height=th; const x=c.getContext('2d');
+  x.fillStyle='#ffffff'; x.fillRect(0,0,tw,th); x.lineCap='round'; x.lineJoin='round'; x.lineWidth=3;
+  for(const s of strokes()){ x.strokeStyle=COLORS[s.color]; x.beginPath(); s.pts.forEach((p,i)=> i?x.lineTo(p.x/W*tw,p.y/H*th):x.moveTo(p.x/W*tw,p.y/H*th)); x.stroke(); }
+  return c.toDataURL('image/png'); }
+let remixOf=null;
+$('galPublish').onclick=async()=>{
+  if(!gal.configured){ $('galNote').textContent='Gallery is not connected yet. Add your Supabase URL and key at the top of the file.'; return; }
+  if(!strokes().length){ $('galNote').textContent='Draw something first.'; return; }
+  const title=$('galTitle').value.trim()||'Untitled sketch'; const author=$('galAuthor').value.trim()||'Anonymous';
+  try{ localStorage.setItem('sketchtune:author',author); }catch(e){}
+  const b=$('galPublish'); b.disabled=true; $('galNote').textContent='Publishing…';
+  try{
+    const code=await shareCode(); const thumb=thumbnail(); if(thumb.length>60000) throw new Error('Thumbnail too large, simplify the drawing a little');
+    const row={title,author,code,thumb,genre:state.genre,bpm:state.bpm,scale:state.scale,key:state.key,prompt:todaysPrompt(),remix_of:remixOf};
+    const out=await galFetch('sketches',{method:'POST',headers:Object.assign(galHeaders(),{'Prefer':'return=representation'}),body:JSON.stringify(row)});
+    $('galNote').textContent='Published. It is now in the gallery.'; remixOf=null; $('galTitle').value=''; gal.page=0; loadGallery(true);
+  }catch(e){ console.error(e); $('galNote').textContent=galError(e); } finally{ b.disabled=false; }
+};
+$('galSort').querySelectorAll('button').forEach(b=>b.onclick=()=>{ gal.sort=b.dataset.s; $('galSort').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); gal.page=0; loadGallery(true); });
+$('promptOnly').onclick=()=>{ gal.promptOnly=!gal.promptOnly; $('promptOnly').classList.toggle('on',gal.promptOnly); gal.page=0; loadGallery(true); };
+$('galMore').onclick=()=>{ gal.page++; loadGallery(false); };
+const PAGE=24;
+async function loadGallery(reset){
+  if(!gal.configured){ $('galNote').textContent='Gallery is not connected yet. Add your Supabase URL and key at the top of the file and run supabase.sql.'; $('cards').innerHTML=''; $('galMore').hidden=true; return; }
+  if(reset){ gal.items=[]; $('cards').innerHTML=''; }
+  $('galNote').textContent='Loading…';
+  try{
+    let q='sketches?select=id,created_at,title,author,genre,bpm,scale,key,thumb,likes,plays,prompt,remix_of&limit='+PAGE+'&offset='+(gal.page*PAGE)+'&order='+(gal.sort==='top'?'likes.desc,created_at.desc':'created_at.desc');
+    if(gal.promptOnly) q+='&prompt=eq.'+encodeURIComponent(todaysPrompt());
+    const rows=await galFetch(q)||[]; gal.items=gal.items.concat(rows); renderCards(rows); $('galMore').hidden=rows.length<PAGE;
+    $('galNote').textContent=gal.items.length?'':(gal.promptOnly?'Nobody has drawn today\u2019s prompt yet. Be the first.':'Nothing here yet. Publish the first sketch.');
+  }catch(e){ console.error(e); $('galNote').textContent=galError(e); }
+}
+function renderCards(rows){ const wrap=$('cards');
+  for(const r of rows){ const el=document.createElement('div'); el.className='card';
+    const img=document.createElement('img'); img.src=r.thumb; img.alt=r.title; img.loading='lazy'; el.appendChild(img);
+    const body=document.createElement('div'); body.className='body'; const t=document.createElement('div'); t.className='t'; t.textContent=r.title; const m=document.createElement('div'); m.className='m'; m.textContent=(r.author||'Anonymous')+' \u00b7 '+(GENRE_LABEL[r.genre]||r.genre||'')+' \u00b7 '+r.bpm+' BPM'+(r.remix_of?' \u00b7 remix':''); body.appendChild(t); body.appendChild(m); el.appendChild(body);
+    const acts=document.createElement('div'); acts.className='acts';
+    const play=document.createElement('button'); play.innerHTML='<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>'; play.title='Play'; play.onclick=()=>openSketch(r,false);
+    const remix=document.createElement('button'); remix.className='text'; remix.textContent='Remix'; remix.onclick=()=>openSketch(r,true);
+    const sp=document.createElement('span'); sp.className='spacer';
+    const like=document.createElement('button'); like.className='like'+(gal.liked.has(r.id)?' on':''); like.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 20l-7-7a4 4 0 0 1 7-5 4 4 0 0 1 7 5z"/></svg><span>'+(r.likes||0)+'</span>'; like.title='Like';
+    like.onclick=async()=>{ if(gal.liked.has(r.id)) return; gal.liked.add(r.id); like.classList.add('on'); like.querySelector('span').textContent=(r.likes||0)+1; try{ localStorage.setItem('sketchtune:liked',JSON.stringify([...gal.liked])); await galFetch('rpc/like_sketch',{method:'POST',body:JSON.stringify({sid:r.id})}); }catch(e){ console.error(e); } };
+    acts.appendChild(play); acts.appendChild(remix); acts.appendChild(sp); acts.appendChild(like); el.appendChild(acts); wrap.appendChild(el); }
+}
+async function openSketch(r,asRemix){
+  try{ const full=await galFetch('sketches?select=code&id=eq.'+r.id); const code=full&&full[0]&&full[0].code; if(!code) throw new Error('missing code');
+    if(state.playing) setPlaying(false); await loadCode(code);
+    if(asRemix){ remixOf=r.id; $('galTitle').value=('Remix of '+r.title).slice(0,60); toast('Loaded. Draw over it, then publish your remix.'); }
+    else { toast('Playing '+r.title); setPlaying(true); galFetch('rpc/play_sketch',{method:'POST',body:JSON.stringify({sid:r.id})}).catch(()=>{}); }
+    document.querySelector('.tabs button[data-tab="draw"]').click();
+  }catch(e){ console.error(e); toast(galError(e)); }
+}
+document.querySelector('.tabs button[data-tab="gallery"]').addEventListener('click',()=>{ if(!gal.items.length) loadGallery(true); });
 
 // keyboard shortcuts
 document.addEventListener('keydown',e=>{ if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return; if(e.key===' '){e.preventDefault();$('play').click();} if(e.key==='e')setTool('eraser'); if(e.key==='p')setTool('pen'); if(e.key==='s')setTool('shape'); if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();$('undo').click();} });
