@@ -6,9 +6,9 @@ Sketchtune turns any drawing into music. A playhead sweeps across your sketch an
 
 **Try it:** https://sheryjohn.github.io/sketchtune/
 
-![Sketchtune on desktop](docs/screenshot.png)
+(docs/screenshot.png)
 
-No install, no account, no backend to run. The whole app is one HTML file.
+No install, no account, no backend to run. 
 
 ## What you can do
 
