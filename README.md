@@ -67,7 +67,7 @@ Open the AI tab, choose a provider, paste a key, press Test, then Save. Nothing 
 
 ## Credits
 
-Inspired by the "draw to play" sequencer concept shared by [@play_music_theory](https://www.instagram.com/play_music_theory/) and built as an open, hackable single file. Shapes, sounds and code are original.
+Inspired by the "draw to play" sequencer concept and built as an open, hackable single file. Shapes, sounds and code are original.
 
 ## License
 
