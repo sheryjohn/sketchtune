@@ -413,7 +413,7 @@ const GENRES = {
   lofi:    ['lofipiano','bell','tape','acoustic','subbass','flute','rim','softkick'],
   ambient: ['pad','bell','tape','chime','drone','flute','chime','softkick'],
   chiptune:['square','pulse','nes','arp','tribass','pulse','noise','kick'],
-  band:    ['sf:acoustic_grand_piano','sf:acoustic_guitar_nylon','sf:string_ensemble_1','sf:electric_piano_1','sf:electric_bass_finger','sf:flute','hat','kick'],
+  band:    ['sf:acoustic_grand_piano','sf:acoustic_guitar_nylon','sf:string_ensemble_1','sf:electric_piano_1','sf:electric_bass_finger','snare','hat','kick'],
 };
 let INSTR = GENRES.pop;
 const SCALES  = {major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], dorian:[0,2,3,5,7,9,10]};
@@ -529,7 +529,7 @@ function render(){
   dctx.clearRect(0,0,W,H);
   dctx.lineCap='round'; dctx.lineJoin='round';
   for(const s of strokes()){
-    dctx.strokeStyle=COLORS[s.color]; dctx.lineWidth=Math.max(2.5,Math.min(4,W/180)); dctx.beginPath();
+    dctx.strokeStyle=COLORS[s.color]; dctx.lineWidth=Math.max(2.5,Math.min(4,W/180))*(s.vel?0.55+0.6*s.vel:1); dctx.beginPath();
     s.pts.forEach((p,i)=> i?dctx.lineTo(p.x,p.y):dctx.moveTo(p.x,p.y)); dctx.stroke();
   }
   if(playX>=0){
@@ -702,7 +702,7 @@ function notesAtStep(step){
     for(let i=0;i<s.pts.length;i++){
       const p=s.pts[i]; const prev=s.pts[i-1];
       const crosses = p.x>=x0&&p.x<x1 || (prev&&((prev.x<x0&&p.x>=x1)||(prev.x>=x1&&p.x<x0)));
-      if(crosses){ const row=Math.min(ROWS-1,Math.max(0,Math.floor(p.y/rowH()))); const k=row+'|'+s.color; if(!found.has(k)) found.set(k,{row,color:s.color,x:x0+colW()/2,y:(row+.5)*rowH()}); }
+      if(crosses){ const row=Math.min(ROWS-1,Math.max(0,Math.floor(p.y/rowH()))); const k=row+'|'+s.color; const v=s.vel||1; const f=found.get(k); if(!f) found.set(k,{row,color:s.color,x:x0+colW()/2,y:(row+.5)*rowH(),vel:v,hold:!!s.hold}); else { f.vel=Math.max(f.vel,v); f.hold=f.hold||!!s.hold; } }
     }
   }
   return [...found.values()];
@@ -715,8 +715,9 @@ function playStep(step,t,heldMap){
   const seen=new Set();
   for(const n of notes){ try{
     const instr=INSTR[n.color]; const degs=chordDegs(ROWS-1-n.row,instr);
-    if(SUSTAIN.has(instr)){ const k=n.row+'|'+n.color; seen.add(k); if(!heldMap.has(k)) heldMap.set(k,degs.map((d,i)=>voice(instr,midiDeg(d),tt,{hold:true,vel:i?.6:1}))); }
-    else degs.forEach((d,i)=>voice(instr,midiDeg(d),tt,{vel:i?.65:1}));
+    const v=n.vel||1;
+    if(SUSTAIN.has(instr)||(n.hold&&!DRUMS.has(instr))){ const k=n.row+'|'+n.color; seen.add(k); if(!heldMap.has(k)) heldMap.set(k,degs.map((d,i)=>voice(instr,midiDeg(d),tt,{hold:true,vel:(i?.6:1)*v}))); }
+    else degs.forEach((d,i)=>voice(instr,midiDeg(d),tt,{vel:(i?.65:1)*v}));
   }catch(e){ console.error(e); } }
   for(const [k,v] of heldMap){ if(!seen.has(k)){ v.forEach(h=>h.release(tt)); heldMap.delete(k); } }
   return {t:tt,step,notes};
@@ -925,7 +926,7 @@ const KEY='sketchtune:v1';
 $('save').onclick=()=>{ try{ localStorage.setItem(KEY,JSON.stringify({patterns:state.patterns,song:state.song,genre:state.genre,volume:state.volume,swing:state.swing,reverb:state.reverb,delay:state.delay,chord:state.chord,bpm:state.bpm,key:state.key,octave:state.octave,scale:state.scale,stepsPerBar:state.stepsPerBar,bars:state.bars,W,H})); toast('Saved in this browser'); }catch(e){ toast('Could not save'); } };
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d) return;
   const sx=W/(d.W||W), sy=H/(d.H||H);
-  state.patterns=d.patterns.map(p=>p.map(s=>({color:s.color,pts:s.pts.map(q=>({x:q.x*sx,y:q.y*sy}))}))); while(state.patterns.length<6) state.patterns.push([]);
+  state.patterns=d.patterns.map(p=>p.map(s=>Object.assign({color:s.color,pts:s.pts.map(q=>({x:q.x*sx,y:q.y*sy}))},s.vel?{vel:s.vel}:{},s.hold?{hold:true}:{}))); while(state.patterns.length<6) state.patterns.push([]);
   Object.assign(state,{bpm:d.bpm,key:d.key,octave:d.octave,scale:d.scale,stepsPerBar:d.stepsPerBar,bars:d.bars}); drawGrid();
   if(d.genre&&GENRES[d.genre]) setGenre(d.genre,false);
   if(typeof d.volume==='number'){ state.volume=d.volume; $('vol').value=d.volume; }
@@ -1203,13 +1204,13 @@ async function importSong(file){
   const maxLen=sr*240; const sig=x.length>maxLen?x.subarray(0,maxLen):x; const N=2048, HOP=512; const frames=Math.floor((sig.length-N)/HOP);
   say('Listening for the beat…'); await yieldUI();
   const win=new Float32Array(N); for(let i=0;i<N;i++) win[i]=.5-.5*Math.cos(2*Math.PI*i/N);
-  const flux=new Float32Array(frames), lowFlux=new Float32Array(frames), highFlux=new Float32Array(frames), lowE=new Float32Array(frames), lowOn=new Float32Array(frames), chroma=[]; let prev=new Float32Array(N/2);
+  const flux=new Float32Array(frames), lowFlux=new Float32Array(frames), highFlux=new Float32Array(frames), midFlux=new Float32Array(frames), lowE=new Float32Array(frames), lowOn=new Float32Array(frames), chroma=[]; let prev=new Float32Array(N/2);
   const re=new Float32Array(N), im=new Float32Array(N); const binHz=sr/N;
   for(let f=0;f<frames;f++){ for(let i=0;i<N;i++){ re[i]=sig[f*HOP+i]*win[i]; im[i]=0; } fft(re,im);
-    const ch=new Float32Array(12); let fl=0,lf=0,hf=0,le=0;
-    for(let k=1;k<N/2;k++){ const m0=Math.hypot(re[k],im[k]); const mag=Math.log1p(m0); const d=mag-prev[k]; const hz=k*binHz; if(hz<120) le+=m0*m0; if(d>0){ fl+=d; if(hz<150) lf+=d; else if(hz>5000) hf+=d; } prev[k]=mag;
+    const ch=new Float32Array(12); let fl=0,lf=0,hf=0,le=0,mf=0;
+    for(let k=1;k<N/2;k++){ const m0=Math.hypot(re[k],im[k]); const mag=Math.log1p(m0); const d=mag-prev[k]; const hz=k*binHz; if(hz<120) le+=m0*m0; if(d>0){ fl+=d; if(hz<150) lf+=d; else if(hz>5000) hf+=d; else if(hz>=150&&hz<2500) mf+=d; } prev[k]=mag;
       if(hz>=250&&hz<=2000){ const pc=((Math.round(12*Math.log2(hz/440))+69)%12+12)%12; ch[pc]+=Math.exp(mag)-1; } }
-    flux[f]=fl; lowFlux[f]=lf; highFlux[f]=hf; lowE[f]=le; lowOn[f]=f?Math.max(0,Math.log(le+1e-6)-Math.log(lowE[f-1]+1e-6)):0; chroma.push(ch); if(f%400===0) await yieldUI(); }
+    flux[f]=fl; lowFlux[f]=lf; highFlux[f]=hf; midFlux[f]=mf; lowE[f]=le; lowOn[f]=f?Math.max(0,Math.log(le+1e-6)-Math.log(lowE[f-1]+1e-6)):0; chroma.push(ch); if(f%400===0) await yieldUI(); }
   // sub-bass kicks (808s) swell rather than click: add their energy onsets to the low-band onset signal
   { let m1=0,m2=0; for(let i=0;i<frames;i++){ m1=Math.max(m1,lowFlux[i]); m2=Math.max(m2,lowOn[i]); } if(m2>0) for(let i=0;i<frames;i++) lowFlux[i]=Math.max(lowFlux[i],lowOn[i]/m2*m1); }
   // tempo by autocorrelation of the onset envelope, 70 to 180 BPM, mild preference near 120
@@ -1226,8 +1227,9 @@ async function importSong(file){
   let phase=0,pv=-1; for(let o=0;o<Math.floor(beatFrames);o++){ let sum=0; for(let k=o;k<frames;k+=beatFrames){ const i=Math.round(k); sum+=envB[i]+(envB[i-1]||0)*.5+(envB[i+1]||0)*.5; } if(sum>pv){ pv=sum; phase=o; } }
   // downbeat: which of the 4 beats carries most low-frequency energy
   let bar=0,bv=-1; for(let b=0;b<4;b++){ let sum=0; for(let k=phase+b*beatFrames;k<frames;k+=4*beatFrames){ const i=Math.round(k); sum+=lowFlux[i]||0; } if(sum>bv){ bv=sum; bar=b; } }
-  const firstBeat=phase+bar*beatFrames; const beatSamples=beatFrames*HOP; const stepSamples=beatSamples/4;
-  const totalStepsIn=Math.floor((sig.length-firstBeat*HOP)/stepSamples); const barsIn=Math.floor(totalStepsIn/16);
+  const firstBeat=phase+bar*beatFrames; const beatSamples=beatFrames*HOP;
+  const SPB=bpm<100?32:16, SEC_STEPS=SPB*2; const stepSamples=beatSamples/(SPB/4); // slow songs get a 32nd-note grid so fast runs survive
+  const totalStepsIn=Math.floor((sig.length-firstBeat*HOP)/stepSamples); const barsIn=Math.floor(totalStepsIn/SPB);
   if(barsIn<2) throw new Error('Could not find a steady beat in that file');
   say('Following the bass and melody… ('+Math.round(bpm)+' BPM)'); await yieldUI();
   let notes=null; try{ const b22=ac.createBuffer(1,sig.length,sr); b22.getChannelData(0).set(sig); notes=await transcribe(b22,say); }catch(e){ console.warn('Basic Pitch unavailable, using the built-in tracker',e); }
@@ -1237,53 +1239,58 @@ async function importSong(file){
   const bassSig=biquadLP(biquadLP(sig,sr,220),sr,220); const melSig=biquadHP(biquadLP(sig,sr,3000),sr,110);
   const stepT=i=>Math.round(firstBeat*HOP+i*stepSamples);
   const steps=[]; const WIN=2048;
-  for(let i=0;i<barsIn*16;i++){ const t0=stepT(i); const bw=bassSig.subarray(t0,Math.min(t0+Math.max(WIN,Math.round(stepSamples)),bassSig.length)); const mw=melSig.subarray(t0,Math.min(t0+WIN,melSig.length));
+  for(let i=0;i<barsIn*SPB;i++){ const t0=stepT(i); const bw=bassSig.subarray(t0,Math.min(t0+Math.max(WIN,Math.round(stepSamples)),bassSig.length)); const mw=melSig.subarray(t0,Math.min(t0+WIN,melSig.length));
     let be=0; for(const v of bw) be+=v*v; be=Math.sqrt(be/bw.length); let me=0; for(const v of mw) me+=v*v; me=Math.sqrt(me/mw.length);
     const bp=be>1e-4?acfPitch(bw,sr,40,200):{midi:0,conf:0}; const mp=me>1e-4?acfPitch(mw,sr,110,2000):{midi:0,conf:0};
-    const f0=Math.floor(t0/HOP), f1=Math.max(f0+1,Math.floor((t0+stepSamples)/HOP)); let lf=0,hf=0,le=0; for(let f=f0;f<f1&&f<frames;f++){ lf=Math.max(lf,lowFlux[f]); hf=Math.max(hf,highFlux[f]); le=Math.max(le,lowE[f]); }
-    steps.push({be,me,bp,mp,lf,hf,le}); if(i%64===0) await yieldUI(); }
+    const f0=Math.floor(t0/HOP), f1=Math.max(f0+1,Math.floor((t0+stepSamples)/HOP)); let lf=0,hf=0,le=0,mf=0; for(let f=f0;f<f1&&f<frames;f++){ lf=Math.max(lf,lowFlux[f]); hf=Math.max(hf,highFlux[f]); le=Math.max(le,lowE[f]); mf=Math.max(mf,midFlux[f]); }
+    steps.push({be,me,bp,mp,lf,hf,le,mf}); if(i%64===0) await yieldUI(); }
   const pct=(arr,q)=>{ const a=arr.slice().sort((x,y)=>x-y); return a[Math.floor(a.length*q)]||0; };
-  const maxBe=pct(steps.map(s=>s.be),.9), maxMe=pct(steps.map(s=>s.me),.9), maxLf=pct(steps.map(s=>s.lf),.95), maxHf=pct(steps.map(s=>s.hf),.95), medLe=pct(steps.map(s=>s.le),.5);
+  const maxBe=pct(steps.map(s=>s.be),.9), maxMe=pct(steps.map(s=>s.me),.9), maxLf=pct(steps.map(s=>s.lf),.95), maxHf=pct(steps.map(s=>s.hf),.95), maxMf=pct(steps.map(s=>s.mf),.95), medLe=pct(steps.map(s=>s.le),.5);
   // apply key before mapping rows
   state.key=key.key; state.scale=key.scale; state.octave=4; keys.querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.n===state.key)); meta();
   say('Finding the chords…'); await yieldUI();
   const TRI={major:[0,4,7],minor:[0,3,7]};
-  const barChords=[]; for(let b=0;b<barsIn;b++){ const c=new Float32Array(12); const f0=Math.floor(stepT(b*16)/HOP), f1=Math.floor(stepT(b*16+16)/HOP); for(let f=f0;f<f1&&f<chroma.length;f++) for(let i=0;i<12;i++) c[i]+=chroma[f][i];
+  const barChords=[]; for(let b=0;b<barsIn;b++){ const c=new Float32Array(12); const f0=Math.floor(stepT(b*SPB)/HOP), f1=Math.floor(stepT(b*SPB+SPB)/HOP); for(let f=f0;f<f1&&f<chroma.length;f++) for(let i=0;i<12;i++) c[i]+=chroma[f][i];
     let best=null; for(let r=0;r<12;r++) for(const q of ['major','minor']){ let sc=0; for(const iv of TRI[q]) sc+=c[(r+iv)%12]; sc-=.3*(c.reduce((a,v)=>a+v,0)); if(!best||sc>best.sc) best={sc,root:r,q}; } barChords.push(best); }
   // ---- build one pattern per 2-bar section ----
-  const sections=[]; const SEC_BARS=2; const nSec=Math.floor(barsIn/SEC_BARS); const cw=W/32, rh=H/14;
-  const px=(step)=>(step+.5)/32*W, py=(row)=>(row+.5)/14*H;
-  for(let sIdx=0;sIdx<nSec;sIdx++){ const st=[]; const base=sIdx*SEC_BARS*16; const feat=[];
+  const sections=[]; const SEC_BARS=2; const nSec=Math.floor(barsIn/SEC_BARS); const cw=W/SEC_STEPS, rh=H/14;
+  const px=(step)=>(step+.5)/SEC_STEPS*W, py=(row)=>(row+.5)/14*H;
+  for(let sIdx=0;sIdx<nSec;sIdx++){ const st=[]; const base=sIdx*SEC_BARS*SPB; const feat=[];
     // drums
-    for(let i=0;i<32;i++){ const s=steps[base+i], l=steps[base+i-1]||{lf:0,hf:0}, r=steps[base+i+1]||{lf:0,hf:0};
+    for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i], l=steps[base+i-1]||{lf:0,hf:0,mf:0,le:0}, r=steps[base+i+1]||{lf:0,hf:0,mf:0};
       const on=s.lf+s.hf, onL=l.lf+l.hf, onR=r.lf+r.hf; const peak=on>=onL&&on>=onR; const lowShare=s.lf/(s.lf+s.hf+1e-9);
       const sub=s.le>medLe*3&&s.le>(l.le||0)*1.4; // an 808 or sub kick: the low band jumps in level
       const kick=(peak&&s.lf>maxLf*.35&&lowShare>.12)||sub; const hat=peak&&!kick&&s.hf>maxHf*.3;
-      if(kick) st.push({color:7,pts:[{x:px(i),y:py(12)+2},{x:px(i),y:py(13)+rh*.4}]}); if(hat) st.push({color:6,pts:[{x:px(i),y:py(0)-rh*.3},{x:px(i),y:py(0)+rh*.3}]}); feat.push(kick?1:0); }
+      const snare=!kick&&s.mf>maxMf*.45&&s.mf>=l.mf&&s.mf>=r.mf&&lowShare<.5; // a mid-band crack that is not a kick
+      if(kick) st.push({color:7,vel:Math.min(1,.55+.45*Math.min(1,s.lf/maxLf)),pts:[{x:px(i),y:py(12)+2},{x:px(i),y:py(13)+rh*.4}]});
+      if(snare) st.push({color:5,vel:Math.min(1,.5+.5*Math.min(1,s.mf/maxMf)),pts:[{x:px(i),y:py(11)-rh*.3},{x:px(i),y:py(11)+rh*.3}]});
+      if(hat&&!snare) st.push({color:6,vel:Math.min(1,.35+.65*Math.min(1,s.hf/maxHf)),pts:[{x:px(i),y:py(0)-rh*.3},{x:px(i),y:py(0)+rh*.3}]}); feat.push(kick?1:0,snare?1:0); }
     if(notes){ // transcribed notes: top voice is the melody, low register the bass, the rest the chords
-      const secStart=stepT(base)/sr, secEnd=stepT(base+32)/sr; const stepS=stepSamples/sr;
-      const active=Array.from({length:32},()=>[]);
-      for(const n of notes){ if(n.t>=secEnd||n.t+n.d<=secStart||n.a<.25) continue; const s0=Math.max(0,Math.floor((n.t-secStart)/stepS+.3)), s1=Math.min(31,Math.ceil((n.t+n.d-secStart)/stepS-.3)); for(let i=s0;i<=s1;i++) active[i].push(n); }
+      const secStart=stepT(base)/sr, secEnd=stepT(base+SEC_STEPS)/sr; const stepS=stepSamples/sr;
+      const active=Array.from({length:SEC_STEPS},()=>[]);
+      for(const n of notes){ if(n.t>=secEnd||n.t+n.d<=secStart||n.a<.3||n.d<.06) continue; const s0=Math.max(0,Math.floor((n.t-secStart)/stepS+.3)), s1=Math.min(SEC_STEPS-1,Math.max(s0,Math.ceil((n.t+n.d-secStart)/stepS-.3))); for(let i=s0;i<=s1;i++) active[i].push(n); }
+      // drop harmonic ghosts: a note an octave or a twelfth above a louder simultaneous note
+      for(let i=0;i<SEC_STEPS;i++){ const a=active[i]; active[i]=a.filter(n=>!a.some(o=>o!==n&&o.a>n.a*1.5&&((n.m-o.m)===12||(n.m-o.m)===19||(n.m-o.m)===24))); }
       const roleRows={mel:new Map(),bass:new Map(),chord:new Map()};
-      for(let i=0;i<32;i++){ const a=active[i]; if(!a.length){ feat.push(-1,-1); continue; } const ms=a.map(n=>n.m); const hi=Math.max(...ms), lo=Math.min(...ms);
+      for(let i=0;i<SEC_STEPS;i++){ const a=active[i]; if(!a.length){ feat.push(-1,-1); continue; } const byM=new Map(); for(const n of a) byM.set(n.m,Math.max(byM.get(n.m)||0,n.a)); const ms=[...byM.keys()]; const hi=Math.max(...ms), lo=Math.min(...ms);
         const melRow=hi>=55?rowForMidi(hi,0,7):-1; const bassRow=lo<50?rowForMidi(lo,9,13):-1; feat.push(melRow,bassRow);
-        if(melRow>=0) roleRows.mel.set(i+'|'+melRow,true); if(bassRow>=0) roleRows.bass.set(i+'|'+bassRow,true);
-        for(const m of ms){ if(m===hi&&melRow>=0) continue; if(m===lo&&bassRow>=0) continue; if(m>=48&&m<=84) roleRows.chord.set(i+'|'+rowForMidi(m,3,10),true); } }
-      const runs=(map,color)=>{ const byRow={}; for(const k of map.keys()){ const [i,r]=k.split('|').map(Number); (byRow[r]=byRow[r]||[]).push(i); }
-        for(const r in byRow){ const is=byRow[r].sort((a,b)=>a-b); let st0=is[0],prev=is[0]; const flush=()=>st.push({color,pts:[{x:px(st0)-cw*.35,y:py(+r)},{x:px(prev)+cw*.35,y:py(+r)}]}); for(let k=1;k<is.length;k++){ if(is[k]===prev+1) prev=is[k]; else { flush(); st0=is[k]; prev=is[k]; } } flush(); } };
+        if(melRow>=0) roleRows.mel.set(i+'|'+melRow,byM.get(hi)); if(bassRow>=0) roleRows.bass.set(i+'|'+bassRow,byM.get(lo));
+        for(const m of ms){ if(m===hi&&melRow>=0) continue; if(m===lo&&bassRow>=0) continue; if(m>=48&&m<=84){ const k=i+'|'+rowForMidi(m,3,10); roleRows.chord.set(k,Math.max(roleRows.chord.get(k)||0,byM.get(m))); } } }
+      const runs=(map,color)=>{ const byRow={}; for(const [k,amp] of map){ const [i,r]=k.split('|').map(Number); (byRow[r]=byRow[r]||[]).push([i,amp]); }
+        for(const r in byRow){ const is=byRow[r].sort((a,b)=>a[0]-b[0]); let st0=is[0][0],prev=is[0][0],amp=is[0][1]; const flush=()=>st.push({color,hold:true,vel:Math.max(.35,Math.min(1,amp*1.3)),pts:[{x:px(st0)-cw*.35,y:py(+r)},{x:px(prev)+cw*.35,y:py(+r)}]}); for(let k=1;k<is.length;k++){ if(is[k][0]===prev+1){ prev=is[k][0]; amp=Math.max(amp,is[k][1]); } else { flush(); st0=is[k][0]; prev=is[k][0]; amp=is[k][1]; } } flush(); } };
       runs(roleRows.bass,4); runs(roleRows.chord,2); runs(roleRows.mel,0);
       sections.push({strokes:st,feat}); continue; }
     // bass: notes held across steps with same row
     let run=null; const flushRun=(r,color)=>{ if(r&&r.len>=1) st.push({color,pts:[{x:px(r.start)-cw*.35,y:py(r.row)},{x:px(r.start+r.len-1)+cw*.35,y:py(r.row)}]}); };
-    for(let i=0;i<32;i++){ const s=steps[base+i]; const ok=s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0; const row=ok?rowForMidi(s.bp.midi,9,13):-1; feat.push(row);
+    for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; const ok=s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0; const row=ok?rowForMidi(s.bp.midi,9,13):-1; feat.push(row);
       if(run&&row===run.row&&ok){ run.len++; } else { flushRun(run,4); run=ok?{row,start:i,len:1}:null; } } flushRun(run,4); run=null;
     // melody: confident, loud, and not jumping wildly
-    const mel=[]; for(let i=0;i<32;i++){ const s=steps[base+i]; const ok=s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0; mel.push(ok?s.mp.midi:0); }
-    for(let i=0;i<32;i++){ if(!mel[i]) continue; const l=mel[i-1]||mel[i], r=mel[i+1]||mel[i]; if(Math.abs(mel[i]-l)>7&&Math.abs(mel[i]-r)>7) mel[i]=0; }
-    for(let i=0;i<32;i++){ const row=mel[i]?rowForMidi(mel[i],0,7):-1; feat.push(row);
+    const mel=[]; for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; const ok=s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0; mel.push(ok?s.mp.midi:0); }
+    for(let i=0;i<SEC_STEPS;i++){ if(!mel[i]) continue; const l=mel[i-1]||mel[i], r=mel[i+1]||mel[i]; if(Math.abs(mel[i]-l)>7&&Math.abs(mel[i]-r)>7) mel[i]=0; }
+    for(let i=0;i<SEC_STEPS;i++){ const row=mel[i]?rowForMidi(mel[i],0,7):-1; feat.push(row);
       if(run&&row===run.row&&row>=0){ run.len++; } else { flushRun(run,0); run=row>=0?{row,start:i,len:1}:null; } } flushRun(run,0); run=null;
     // chords: purple blocks, root third fifth, one per bar, only when the bar has sustained energy
-    for(let b=0;b<SEC_BARS;b++){ const ch=barChords[sIdx*SEC_BARS+b]; if(!ch) continue; feat.push(ch.root,ch.q==='major'?1:0); for(const iv of TRI[ch.q]){ const row=rowForMidi(60+ch.root+iv,5,9); st.push({color:2,pts:[{x:px(b*16)-cw*.3,y:py(row)},{x:px(b*16+15)+cw*.3,y:py(row)}]}); } }
+    for(let b=0;b<SEC_BARS;b++){ const ch=barChords[sIdx*SEC_BARS+b]; if(!ch) continue; feat.push(ch.root,ch.q==='major'?1:0); for(const iv of TRI[ch.q]){ const row=rowForMidi(60+ch.root+iv,5,9); st.push({color:2,pts:[{x:px(b*SPB)-cw*.3,y:py(row)},{x:px(b*SPB+SPB-1)+cw*.3,y:py(row)}]}); } }
     sections.push({strokes:st,feat}); }
   say('Grouping sections…'); await yieldUI();
   // cluster similar sections into at most maxSlots patterns (greedy, by feature distance)
@@ -1294,10 +1301,11 @@ async function importSong(file){
   // write into the app
   if(state.playing) setPlaying(false);
   state.patterns=[]; reps.forEach((r,i)=>{ state.patterns[i]=r.strokes; }); while(state.patterns.length<6) state.patterns.push([]);
-  state.stepsPerBar=16; state.bars=2; $('density').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.steps===16));
+  state.stepsPerBar=SPB; state.bars=2; $('density').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.steps===SPB));
+  if(state.genre!=='band') setGenre('band',false);
   setBpm(bpm); state.song={on:true,seq:seq}; $('songMode').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.m==='song'));
   state.chord='off'; syncFeel(); setSlot(0); drawGrid(); render(); meta(); renderTimeline(); $('hint').classList.add('off'); state.imported=true; importOriginal={buffer:buf,offset:firstBeat*HOP/sr}; $('origRow').hidden=false; $('origOn').classList.remove('on'); state.original=false;
-  say('Imported'+(notes?' with Basic Pitch':' with the built-in tracker')+': '+Math.round(bpm)+' BPM, '+KEYNAMES[key.key]+' '+key.scale+', '+barsIn+' bars in '+reps.length+' part'+(reps.length===1?'':'s')+'. Black ticks are the kick, blue the bass, green the melody, purple the chords. Try the Band genre for realistic instruments.');
+  say('Imported'+(notes?' with Basic Pitch':' with the built-in tracker')+': '+Math.round(bpm)+' BPM, '+KEYNAMES[key.key]+' '+key.scale+', '+barsIn+' bars in '+reps.length+' part'+(reps.length===1?'':'s')+'. Black ticks are the kick, pink the snare, light blue the hats, blue the bass, green the melody, purple the chords. Thicker lines are louder notes.');
   return reps.length; }
 $('songImport').onclick=()=>$('songFile').click();
 $('songFile').onchange=async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f) return; const b=$('songImport'); b.disabled=true;
@@ -1310,20 +1318,20 @@ function b32enc(bytes){ let out='',bits=0,val=0; for(const b of bytes){ val=(val
 function b32dec(str){ const out=[]; let bits=0,val=0; for(const c of str){ const v=B32.indexOf(c); if(v<0) continue; val=(val<<5)|v; bits+=5; if(bits>=8){ out.push((val>>>(bits-8))&255); bits-=8; } } return new Uint8Array(out); }
 const GENRE_KEYS=Object.keys(GENRES), SCALE_KEYS=Object.keys(SCALES), CHORDS=['off','triad','power','seventh'];
 function packState(){
-  const bytes=[3,GENRE_KEYS.indexOf(state.genre),Math.round(state.bpm),state.key,state.octave,SCALE_KEYS.indexOf(state.scale),state.stepsPerBar,state.bars,Math.round(state.swing*100),Math.round(state.reverb*100),Math.round(state.delay*100),CHORDS.indexOf(state.chord),state.patterns.length,state.slot,state.song.on?1:0,state.song.seq.length,...state.song.seq.flatMap(x=>[x.slot,x.repeat])];
+  const bytes=[4,GENRE_KEYS.indexOf(state.genre),Math.round(state.bpm),state.key,state.octave,SCALE_KEYS.indexOf(state.scale),state.stepsPerBar,state.bars,Math.round(state.swing*100),Math.round(state.reverb*100),Math.round(state.delay*100),CHORDS.indexOf(state.chord),state.patterns.length,state.slot,state.song.on?1:0,state.song.seq.length,...state.song.seq.flatMap(x=>[x.slot,x.repeat])];
   for(const pat of state.patterns){
-    const simp=pat.map(s=>{ const pts=[]; let last=null; for(const p of s.pts){ const q={x:Math.max(0,Math.min(255,Math.round(p.x/W*255))),y:Math.max(0,Math.min(255,Math.round(p.y/H*255)))}; if(!last||Math.abs(q.x-last.x)+Math.abs(q.y-last.y)>=2) { pts.push(q); last=q; } } if(pts.length<2&&s.pts.length) pts.push(pts[0]||{x:0,y:0}); return {color:s.color,pts}; }).filter(s=>s.pts.length>=1);
+    const simp=pat.map(s=>{ const pts=[]; let last=null; for(const p of s.pts){ const q={x:Math.max(0,Math.min(255,Math.round(p.x/W*255))),y:Math.max(0,Math.min(255,Math.round(p.y/H*255)))}; if(!last||Math.abs(q.x-last.x)+Math.abs(q.y-last.y)>=2) { pts.push(q); last=q; } } if(pts.length<2&&s.pts.length) pts.push(pts[0]||{x:0,y:0}); return {color:s.color,vel:s.vel,hold:s.hold,pts}; }).filter(s=>s.pts.length>=1);
     bytes.push(simp.length>>8,simp.length&255);
-    for(const s of simp){ bytes.push(s.color,s.pts.length>>8,s.pts.length&255); for(const q of s.pts) bytes.push(q.x,q.y); }
+    for(const s of simp){ bytes.push(s.color,Math.round((s.vel||1)*100),s.hold?1:0,s.pts.length>>8,s.pts.length&255); for(const q of s.pts) bytes.push(q.x,q.y); }
   }
   return new Uint8Array(bytes);
 }
 function unpackState(b){
   let i=0; const rd=()=>b[i++];
-  const ver=rd(); if(ver<1||ver>3) throw new Error('version');
+  const ver=rd(); if(ver<1||ver>4) throw new Error('version');
   const g=GENRE_KEYS[rd()]; const bpm=rd(); const key=rd(); const oct=rd(); const sc=SCALE_KEYS[rd()]; const spb=rd(); const bars=rd(); const sw=rd()/100, rv=rd()/100, dl=rd()/100; const ch=CHORDS[rd()]; const np=ver>=2?rd():3; const slot=ver>=2?rd():0; let songOn=false, seq=[]; if(ver>=3){ songOn=!!rd(); const ns=rd(); for(let i=0;i<ns;i++){ const sl=rd(), rp=rd(); seq.push({slot:sl,repeat:rp}); } }
   const pats=[];
-  for(let p=0;p<np;p++){ const n=(rd()<<8)|rd(); const pat=[]; for(let k=0;k<n;k++){ const color=rd(); const m=(rd()<<8)|rd(); const pts=[]; for(let j=0;j<m;j++){ const x=rd(), y=rd(); pts.push({x:x/255*W,y:y/255*H}); } if(pts.length===1) pts.push({x:pts[0].x+1,y:pts[0].y}); pat.push({color,pts}); } pats.push(pat); }
+  for(let p=0;p<np;p++){ const n=(rd()<<8)|rd(); const pat=[]; for(let k=0;k<n;k++){ const color=rd(); let vel=1,hold=false; if(ver>=4){ vel=rd()/100; hold=!!rd(); } const m=(rd()<<8)|rd(); const pts=[]; for(let j=0;j<m;j++){ const x=rd(), y=rd(); pts.push({x:x/255*W,y:y/255*H}); } if(pts.length===1) pts.push({x:pts[0].x+1,y:pts[0].y}); const stk={color,pts}; if(vel!==1) stk.vel=vel; if(hold) stk.hold=true; pat.push(stk); } pats.push(pat); }
   while(pats.length<6) pats.push([]); state.patterns=pats; let sl=slot<state.patterns.length?slot:0; if(sl>2&&!state.pro&&PRO_GATES) sl=pats.findIndex(x=>x.length)>=0?Math.min(2,Math.max(0,pats.findIndex(x=>x.length))):0; if(!pats[sl].length){ const f=pats.findIndex((x,i)=>x.length&&(i<3||state.pro||!PRO_GATES)); if(f>=0) sl=f; } state.slot=sl; $('slots').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.slot===sl)); Object.assign(state,{bpm,key,octave:oct,scale:sc||'major',stepsPerBar:spb||16,bars:bars||2,swing:sw,reverb:rv,delay:dl,chord:ch||'off'});
   state.song={on:songOn&&seq.length>0,seq}; $('songMode').querySelectorAll('button').forEach(x=>x.classList.toggle('on',(x.dataset.m==='song')===state.song.on)); renderTimeline();
   if(g) setGenre(g,false);
