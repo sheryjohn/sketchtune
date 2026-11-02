@@ -717,6 +717,11 @@ const stepDur = () => 60/state.bpm/(state.stepsPerBar/4);
 function notesAtStep(step){
   const x0=step*colW(), x1=x0+colW(); const found=new Map(); // key: row|color -> point
   for(const s of strokes()){
+    if(s.joined){ // a continuous line: sample it at the column centre, one note per column
+      const xc=x0+colW()/2; const P=s.pts; if(xc<P[0].x-colW()*.5||xc>P[P.length-1].x+colW()*.5) continue; let y=null;
+      for(let i=0;i<P.length-1;i++){ const a=P[i],b=P[i+1]; if(xc>=a.x&&xc<=b.x){ y=b.x===a.x?a.y:a.y+(b.y-a.y)*(xc-a.x)/(b.x-a.x); break; } }
+      if(y===null) y=xc<P[0].x?P[0].y:P[P.length-1].y;
+      const row=Math.min(ROWS-1,Math.max(0,Math.floor(y/rowH()))); const k=row+'|'+s.color; const v=s.vel||1; const f=found.get(k); if(!f) found.set(k,{row,color:s.color,x:xc,y:(row+.5)*rowH(),vel:v,hold:!!s.hold}); else { f.vel=Math.max(f.vel,v); f.hold=f.hold||!!s.hold; } continue; }
     for(let i=0;i<s.pts.length;i++){
       const p=s.pts[i]; const prev=s.pts[i-1];
       const crosses = p.x>=x0&&p.x<x1 || (prev&&((prev.x<x0&&p.x>=x1)||(prev.x>=x1&&p.x<x0)));
@@ -945,7 +950,7 @@ const KEY='sketchtune:v1';
 $('save').onclick=()=>{ try{ localStorage.setItem(KEY,JSON.stringify({patterns:state.patterns,song:state.song,genre:state.genre,volume:state.volume,swing:state.swing,reverb:state.reverb,delay:state.delay,chord:state.chord,bpm:state.bpm,key:state.key,octave:state.octave,scale:state.scale,stepsPerBar:state.stepsPerBar,bars:state.bars,W,H})); toast('Saved in this browser'); }catch(e){ toast('Could not save'); } };
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d) return;
   const sx=W/(d.W||W), sy=H/(d.H||H);
-  state.patterns=d.patterns.map(p=>p.map(s=>Object.assign({color:s.color,pts:s.pts.map(q=>({x:q.x*sx,y:q.y*sy}))},s.vel?{vel:s.vel}:{},s.hold?{hold:true}:{}))); while(state.patterns.length<6) state.patterns.push([]);
+  state.patterns=d.patterns.map(p=>p.map(s=>Object.assign({color:s.color,pts:s.pts.map(q=>({x:q.x*sx,y:q.y*sy}))},s.vel?{vel:s.vel}:{},s.hold?{hold:true}:{},s.joined?{joined:true}:{}))); while(state.patterns.length<6) state.patterns.push([]);
   Object.assign(state,{bpm:d.bpm,key:d.key,octave:d.octave,scale:d.scale,stepsPerBar:d.stepsPerBar,bars:d.bars}); drawGrid();
   if(d.genre&&GENRES[d.genre]) setGenre(d.genre,false);
   if(typeof d.volume==='number'){ state.volume=d.volume; $('vol').value=d.volume; }
@@ -1274,9 +1279,7 @@ async function importSong(file){
   // ---- 3. transcription: harmonic part for melody and chords, a low-passed copy for the bass ----
   let notesH=null, notesB=null;
   try{
-    const bH=ac.createBuffer(1,sig.length,sr); bH.getChannelData(0).set(harm); notesH=await transcribe(bH,p=>say(p.replace('Transcribing notes','Transcribing harmony')));
-    let low=biquadLP(biquadLP(harm,sr,260),sr,260); let pk=0; for(const v of low) pk=Math.max(pk,Math.abs(v)); if(pk>0){ const g=.9/pk; for(let i=0;i<low.length;i++) low[i]*=g; }
-    const bB=ac.createBuffer(1,sig.length,sr); bB.getChannelData(0).set(low); notesB=await transcribe(bB,p=>say(p.replace('Transcribing notes','Transcribing bass')));
+    const bH=ac.createBuffer(1,sig.length,sr); bH.getChannelData(0).set(sig); notesH=await transcribe(bH,say); notesB=notesH;
   }catch(e){ console.warn('Basic Pitch unavailable, using the built-in tracker',e); notesH=null; }
   const usedModel=!!notesH;
 
@@ -1307,28 +1310,31 @@ async function importSong(file){
     // harmonic ghosts: an octave or a twelfth above a louder simultaneous note
     for(let i=0;i<nStepsAll;i++){ const a=act[i]; act[i]=a.filter(n=>!a.some(o=>o!==n&&o.a>n.a*1.5&&((n.m-o.m)===12||(n.m-o.m)===19||(n.m-o.m)===24))); } return act; };
   const actH=perStep(notesH,.3,.06), actB=perStep(notesB,.2,.08);
-  // Viterbi path through candidate notes: reward loudness, penalise jumps, allow silence
-  const trackLine=(act,pick,jumpCost,silence)=>{ const S=act.length; const cands=act.map(a=>pick(a)); const path=new Array(S).fill(null);
-    let prevStates=[{m:null,score:0,back:-1}]; const table=[];
-    for(let i=0;i<S;i++){ const states=[{m:null,a:0}].concat(cands[i].map(n=>({m:n.m,a:n.a}))); const cur=states.map(st=>{ let best=-1e9,bk=-1; prevStates.forEach((ps,pi)=>{ let tr=0; if(ps.m===null&&st.m!==null) tr=-silence; else if(ps.m!==null&&st.m===null) tr=-silence; else if(ps.m!==null&&st.m!==null){ const d=Math.abs(ps.m-st.m); tr=-jumpCost*d; if(d===0) tr+=.05; } const sc=ps.score+tr+(st.m!==null?st.a:-.02); if(sc>best){ best=sc; bk=pi; } }); return {m:st.m,score:best,back:bk,a:st.a}; }); table.push(cur); prevStates=cur; }
-    let bi=0; for(let k=1;k<prevStates.length;k++) if(prevStates[k].score>prevStates[bi].score) bi=k;
-    for(let i=S-1;i>=0;i--){ const st=table[i][bi]; path[i]=st.m===null?null:{m:st.m,a:st.a}; bi=st.back; } return path; };
-  const melPath=usedModel?trackLine(actH,a=>a.filter(n=>n.m>=50&&n.m<=96),.06,.15):null;
-  const bassPath=usedModel?trackLine(actB,a=>a.filter(n=>n.m>=24&&n.m<=62).map(n=>({m:n.m,a:n.a+(n.m<48?.15:0)})),.05,.12):null;
-  // chords: per half bar from the mid register, excluding the melody note
-  const TRI={major:[0,4,7],minor:[0,3,7]}; const halfSteps=SPB/2; const chordsHB=[];
-  for(let h=0;h<Math.floor(nStepsAll/halfSteps);h++){ const hist=new Float32Array(12); let tot=0;
-    for(let i=h*halfSteps;i<(h+1)*halfSteps;i++){ const a=usedModel?actH[i]:[]; for(const n of a){ if(n.m<45||n.m>84) continue; if(melPath&&melPath[i]&&melPath[i].m===n.m) continue; hist[((n.m%12)+12)%12]+=n.a; tot+=n.a; } }
-    if(!usedModel){ const f0=Math.floor(stepT(h*halfSteps)/HOP), f1=Math.floor(stepT((h+1)*halfSteps)/HOP); for(let f=f0;f<f1&&f<frames;f++) for(let k=0;k<12;k++){ hist[k]+=chroma[f][k]; tot+=chroma[f][k]; } }
-    let best=null; for(let r=0;r<12;r++) for(const q of ['major','minor']){ let sc=0; for(const iv of TRI[q]) sc+=hist[(r+iv)%12]; sc-=.25*tot; if(!best||sc>best.sc) best={sc,root:r,q,strength:tot?sc/tot:0}; }
-    chordsHB.push(tot>0&&best.strength>.15?best:null); }
+  // per step: the top voice is the melody, the lowest note (below C3) the bass, everything else is drawn as it is
+  const melAll=[], bassAll=[], midAll=[];
+  for(let i=0;i<nStepsAll;i++){ const a=actH[i]; if(!a.length){ melAll.push(null); bassAll.push(null); midAll.push([]); continue; }
+    const byM=new Map(); for(const n of a) byM.set(n.m,Math.max(byM.get(n.m)||0,n.a)); const ms=[...byM.keys()]; const hi=Math.max(...ms), lo=Math.min(...ms);
+    const mel=hi>=55?{m:hi,a:byM.get(hi)}:null; const bass=lo<50?{m:lo,a:byM.get(lo)}:null; melAll.push(mel); bassAll.push(bass);
+    midAll.push(ms.filter(m=>!(mel&&m===hi)&&!(bass&&m===lo)&&m>=48&&m<=84).map(m=>({m,a:byM.get(m)}))); }
 
   // ---- 7. build one pattern per section ----
   const sections=[]; const nSec=Math.floor(barsIn/SEC_BARS); const cw=W/SEC_STEPS, rh=H/14;
   const px=(step)=>(step+.5)/SEC_STEPS*W, py=(row)=>(row+.5)/14*H;
-  const pushRuns=(st,items,color,lo,hi,hold)=>{ // items: array over section steps of {m,a} or null; merges consecutive equal rows into one stroke
-    let run=null; const flush=()=>{ if(run) st.push({color,hold,vel:Math.max(.35,Math.min(1,run.a*1.3)),pts:[{x:px(run.s0)-cw*.35,y:py(run.row)},{x:px(run.s1)+cw*.35,y:py(run.row)}]}); run=null; };
-    items.forEach((it,i)=>{ const row=it?rowForMidi(it.m,lo,hi):-1; if(run&&it&&row===run.row&&it.m===run.m){ run.s1=i; run.a=Math.max(run.a,it.a); } else { flush(); if(it) run={row,m:it.m,s0:i,s1:i,a:it.a}; } }); flush(); };
+  const pushLine=(st,items,color,lo,hi)=>{ // items per step: {m,a} or null. Each unbroken phrase becomes one continuous line:
+    // flat where a note holds, slanted between different notes (a slide or a step), so the drawing reads like a melody
+    let pts=[],amp=0; const flush=()=>{ if(pts.length){ if(pts.length===1) pts.push({x:pts[0].x+cw*.6,y:pts[0].y}); st.push({color,hold:true,joined:true,vel:Math.max(.35,Math.min(1,amp*1.3)),pts}); } pts=[]; amp=0; };
+    let prevRow=-1;
+    items.forEach((it,i)=>{ if(!it){ flush(); prevRow=-1; return; } const row=rowForMidi(it.m,lo,hi); const x=px(i), y=py(row);
+      if(!pts.length){ pts.push({x:x-cw*.4,y}); pts.push({x,y}); }
+      else if(row===prevRow){ pts[pts.length-1]={x,y}; }
+      else { pts.push({x:x-cw*.6,y:pts[pts.length-1].y}); pts.push({x,y}); }
+      amp=Math.max(amp,it.a); prevRow=row; });
+    flush(); };
+  const pushBars=(st,lists,color,lo,hi)=>{ // lists per step: arrays of {m,a}; equal notes in consecutive steps merge into one bar
+    const open=new Map(); const bar=r=>st.push({color,hold:true,vel:Math.max(.35,Math.min(1,r.a*1.3)),pts:[{x:px(r.s0)-cw*.35,y:py(r.row)},{x:px(r.s1)+cw*.35,y:py(r.row)}]});
+    lists.forEach((lst,i)=>{ const now=new Set(lst.map(n=>n.m)); for(const [m,r] of [...open]){ if(!now.has(m)){ bar(r); open.delete(m); } }
+      for(const n of lst){ const r=open.get(n.m); if(r){ r.s1=i; r.a=Math.max(r.a,n.a); } else open.set(n.m,{row:rowForMidi(n.m,lo,hi),s0:i,s1:i,a:n.a}); } });
+    for(const r of open.values()) bar(r); };
   for(let sIdx=0;sIdx<nSec;sIdx++){ const st=[]; const base=sIdx*SEC_STEPS; const feat=[];
     for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i], l=steps[base+i-1]||{lf:0,hf:0,mf:0,le:0}, r=steps[base+i+1]||{lf:0,hf:0,mf:0};
       const on=s.lf+s.hf, onL=l.lf+l.hf, onR=r.lf+r.hf; const peak=on>=onL&&on>=onR; const lowShare=s.lf/(s.lf+s.hf+1e-9);
@@ -1338,14 +1344,13 @@ async function importSong(file){
       if(kick) st.push({color:7,vel:Math.min(1,.55+.45*Math.min(1,s.lf/maxLf)),pts:[{x:px(i),y:py(12)+2},{x:px(i),y:py(13)+rh*.4}]});
       if(snare) st.push({color:5,vel:Math.min(1,.5+.5*Math.min(1,s.mf/maxMf)),pts:[{x:px(i),y:py(11)-rh*.3},{x:px(i),y:py(11)+rh*.3}]});
       if(hat&&!snare) st.push({color:6,vel:Math.min(1,.35+.65*Math.min(1,s.hf/maxHf)),pts:[{x:px(i),y:py(0)-rh*.3},{x:px(i),y:py(0)+rh*.3}]}); feat.push(kick?1:0,snare?1:0); }
-    let melItems, bassItems;
-    if(usedModel){ melItems=melPath.slice(base,base+SEC_STEPS); bassItems=bassPath.slice(base,base+SEC_STEPS); }
-    else { melItems=[]; bassItems=[]; for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; melItems.push(s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0?{m:Math.round(s.mp.midi),a:.7}:null); bassItems.push(s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0?{m:Math.round(s.bp.midi),a:.7}:null); } }
-    melItems.forEach(it=>feat.push(it?it.m:-1)); bassItems.forEach(it=>feat.push(it?it.m:-1));
-    pushRuns(st,bassItems,4,9,13,true);
-    for(let h=0;h<SEC_STEPS/halfSteps;h++){ const ch=chordsHB[Math.floor(base/halfSteps)+h]; feat.push(ch?ch.root*2+(ch.q==='major'?1:0):-1); if(!ch) continue;
-      for(const iv of TRI[ch.q]){ const row=rowForMidi(60+ch.root+iv,4,9); st.push({color:2,hold:true,vel:Math.max(.4,Math.min(.9,ch.strength*1.6)),pts:[{x:px(h*halfSteps)-cw*.3,y:py(row)},{x:px((h+1)*halfSteps-1)+cw*.3,y:py(row)}]}); } }
-    pushRuns(st,melItems,0,0,7,true);
+    let melItems, bassItems, midItems;
+    if(usedModel){ melItems=melAll.slice(base,base+SEC_STEPS); bassItems=bassAll.slice(base,base+SEC_STEPS); midItems=midAll.slice(base,base+SEC_STEPS); }
+    else { melItems=[]; bassItems=[]; midItems=[]; for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; melItems.push(s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0?{m:Math.round(s.mp.midi),a:.7}:null); bassItems.push(s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0?{m:Math.round(s.bp.midi),a:.7}:null); midItems.push([]); } }
+    melItems.forEach(it=>feat.push(it?it.m:-1)); bassItems.forEach(it=>feat.push(it?it.m:-1)); midItems.forEach(l=>feat.push(l.length?l[0].m:-1));
+    pushLine(st,bassItems,4,9,13);
+    pushBars(st,midItems,2,3,10);
+    pushLine(st,melItems,0,0,7);
     sections.push({strokes:st,feat}); }
 
   // ---- 8. group repeated sections, write into the app ----
@@ -1375,9 +1380,9 @@ const GENRE_KEYS=Object.keys(GENRES), SCALE_KEYS=Object.keys(SCALES), CHORDS=['o
 function packState(){
   const bytes=[4,GENRE_KEYS.indexOf(state.genre),Math.round(state.bpm),state.key,state.octave,SCALE_KEYS.indexOf(state.scale),state.stepsPerBar,state.bars,Math.round(state.swing*100),Math.round(state.reverb*100),Math.round(state.delay*100),CHORDS.indexOf(state.chord),state.patterns.length,state.slot,state.song.on?1:0,state.song.seq.length,...state.song.seq.flatMap(x=>[x.slot,x.repeat])];
   for(const pat of state.patterns){
-    const simp=pat.map(s=>{ const pts=[]; let last=null; for(const p of s.pts){ const q={x:Math.max(0,Math.min(255,Math.round(p.x/W*255))),y:Math.max(0,Math.min(255,Math.round(p.y/H*255)))}; if(!last||Math.abs(q.x-last.x)+Math.abs(q.y-last.y)>=2) { pts.push(q); last=q; } } if(pts.length<2&&s.pts.length) pts.push(pts[0]||{x:0,y:0}); return {color:s.color,vel:s.vel,hold:s.hold,pts}; }).filter(s=>s.pts.length>=1);
+    const simp=pat.map(s=>{ const pts=[]; let last=null; for(const p of s.pts){ const q={x:Math.max(0,Math.min(255,Math.round(p.x/W*255))),y:Math.max(0,Math.min(255,Math.round(p.y/H*255)))}; if(!last||Math.abs(q.x-last.x)+Math.abs(q.y-last.y)>=2) { pts.push(q); last=q; } } if(pts.length<2&&s.pts.length) pts.push(pts[0]||{x:0,y:0}); return {color:s.color,vel:s.vel,hold:s.hold,joined:s.joined,pts}; }).filter(s=>s.pts.length>=1);
     bytes.push(simp.length>>8,simp.length&255);
-    for(const s of simp){ bytes.push(s.color,Math.round((s.vel||1)*100),s.hold?1:0,s.pts.length>>8,s.pts.length&255); for(const q of s.pts) bytes.push(q.x,q.y); }
+    for(const s of simp){ bytes.push(s.color,Math.round((s.vel||1)*100),(s.hold?1:0)|(s.joined?2:0),s.pts.length>>8,s.pts.length&255); for(const q of s.pts) bytes.push(q.x,q.y); }
   }
   return new Uint8Array(bytes);
 }
@@ -1386,7 +1391,7 @@ function unpackState(b){
   const ver=rd(); if(ver<1||ver>4) throw new Error('version');
   const g=GENRE_KEYS[rd()]; const bpm=rd(); const key=rd(); const oct=rd(); const sc=SCALE_KEYS[rd()]; const spb=rd(); const bars=rd(); const sw=rd()/100, rv=rd()/100, dl=rd()/100; const ch=CHORDS[rd()]; const np=ver>=2?rd():3; const slot=ver>=2?rd():0; let songOn=false, seq=[]; if(ver>=3){ songOn=!!rd(); const ns=rd(); for(let i=0;i<ns;i++){ const sl=rd(), rp=rd(); seq.push({slot:sl,repeat:rp}); } }
   const pats=[];
-  for(let p=0;p<np;p++){ const n=(rd()<<8)|rd(); const pat=[]; for(let k=0;k<n;k++){ const color=rd(); let vel=1,hold=false; if(ver>=4){ vel=rd()/100; hold=!!rd(); } const m=(rd()<<8)|rd(); const pts=[]; for(let j=0;j<m;j++){ const x=rd(), y=rd(); pts.push({x:x/255*W,y:y/255*H}); } if(pts.length===1) pts.push({x:pts[0].x+1,y:pts[0].y}); const stk={color,pts}; if(vel!==1) stk.vel=vel; if(hold) stk.hold=true; pat.push(stk); } pats.push(pat); }
+  for(let p=0;p<np;p++){ const n=(rd()<<8)|rd(); const pat=[]; for(let k=0;k<n;k++){ const color=rd(); let vel=1,hold=false,joined=false; if(ver>=4){ vel=rd()/100; const fl=rd(); hold=!!(fl&1); joined=!!(fl&2); } const m=(rd()<<8)|rd(); const pts=[]; for(let j=0;j<m;j++){ const x=rd(), y=rd(); pts.push({x:x/255*W,y:y/255*H}); } if(pts.length===1) pts.push({x:pts[0].x+1,y:pts[0].y}); const stk={color,pts}; if(vel!==1) stk.vel=vel; if(hold) stk.hold=true; if(joined) stk.joined=true; pat.push(stk); } pats.push(pat); }
   while(pats.length<6) pats.push([]); state.patterns=pats; let sl=slot<state.patterns.length?slot:0; if(sl>2&&!state.pro&&PRO_GATES) sl=pats.findIndex(x=>x.length)>=0?Math.min(2,Math.max(0,pats.findIndex(x=>x.length))):0; if(!pats[sl].length){ const f=pats.findIndex((x,i)=>x.length&&(i<3||state.pro||!PRO_GATES)); if(f>=0) sl=f; } state.slot=sl; $('slots').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.slot===sl)); Object.assign(state,{bpm,key,octave:oct,scale:sc||'major',stepsPerBar:spb||16,bars:bars||2,swing:sw,reverb:rv,delay:dl,chord:ch||'off'});
   state.song={on:songOn&&seq.length>0,seq}; $('songMode').querySelectorAll('button').forEach(x=>x.classList.toggle('on',(x.dataset.m==='song')===state.song.on)); renderTimeline();
   if(g) setGenre(g,false);
