@@ -289,7 +289,8 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
           <button id="loop" class="text" title="Loop length" aria-label="Loop length">2 bars</button>
         </div>
         <div class="lblrow"><div class="lbl">Song</div>
-          <div class="seg small" id="songMode"><button data-m="loop" class="on">Loop</button><button data-m="song">Song</button></div>
+          <div class="grp"><button id="followSong" class="text on" style="height:30px;font-size:12px" title="Switch the canvas to the part that is playing">Follow</button>
+          <div class="seg small" id="songMode"><button data-m="loop" class="on">Loop</button><button data-m="song">Song</button></div></div>
         </div>
         <div class="timeline" id="timeline"></div>
         <div class="row">
@@ -759,8 +760,9 @@ $('songAdd').onclick=()=>{ if(state.song.seq.length>=128){ toast('That is plenty
 function songAdvance(){ // called when a loop of the current section finishes
   if(!state.song.on||!state.song.seq.length) return;
   songRep++; if(songRep>=state.song.seq[songSec].repeat){ songRep=0; songSec=(songSec+1)%state.song.seq.length; if(songSec===0&&importOriginal&&state.original) origStart(nextTime); }
-  const sl=state.song.seq[songSec].slot; if(sl!==state.slot) setSlot(sl); renderTimeline(); }
-function songStart(){ songSec=0; songRep=0; if(state.song.on&&state.song.seq.length){ setSlot(state.song.seq[0].slot); } renderTimeline(); }
+  const sl=state.song.seq[songSec].slot; if(sl!==state.slot&&state.follow!==false) setSlot(sl); renderTimeline(); }
+function songStart(){ songSec=0; songRep=0; if(state.song.on&&state.song.seq.length&&state.follow!==false){ setSlot(state.song.seq[0].slot); } renderTimeline(); }
+$('followSong').onclick=()=>{ state.follow=state.follow===false; $('followSong').classList.toggle('on',state.follow!==false); };
 
 function schedule(){
   while(nextTime<ac.currentTime+.12){
@@ -1184,7 +1186,7 @@ let bpLib=null;
 function loadBasicPitch(){ if(window.BasicPitchLib) return Promise.resolve(window.BasicPitchLib); if(bpLib) return bpLib;
   bpLib=new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='lib/basicpitch.js'; sc.onload=()=>res(window.BasicPitchLib); sc.onerror=()=>rej(new Error('model script not found')); document.head.appendChild(sc); }).catch(e=>{ bpLib=null; throw e; }); return bpLib; }
 async function transcribe(buf22k,say){ const lib=await loadBasicPitch(); const bp=new lib.BasicPitch('lib/model/model.json'); const frames=[],onsets=[],contours=[];
-  await bp.evaluateModel(buf22k,(f,o,c)=>{ frames.push(...f); onsets.push(...o); contours.push(...c); },p=>{ say('Transcribing notes… '+Math.round(p*100)+'%'); });
+  await bp.evaluateModel(buf22k,(f,o,c)=>{ frames.push(...f); onsets.push(...o); contours.push(...c); },p=>{ say('Transcribing notes… '+Math.round(p*100)+'%'); }); await yieldUI();
   const notes=lib.noteFramesToTime(lib.addPitchBendsToNoteEvents(contours,lib.outputToNotesPoly(frames,onsets,0.5,0.3,11)));
   return notes.map(n=>({t:n.startTimeSeconds,d:n.durationSeconds,m:n.pitchMidi,a:n.amplitude})); }
 
@@ -1218,111 +1220,147 @@ async function importSong(file){
   // mono, downsampled to 22050
   const sr=22050, ratio=buf.sampleRate/sr, n=Math.floor(buf.length/ratio); const x=new Float32Array(n);
   for(let c=0;c<buf.numberOfChannels;c++){ const d=buf.getChannelData(c); for(let i=0;i<n;i++) x[i]+=d[Math.floor(i*ratio)]/buf.numberOfChannels; }
-  const maxLen=sr*240; const sig=x.length>maxLen?x.subarray(0,maxLen):x; const N=2048, HOP=512; const frames=Math.floor((sig.length-N)/HOP);
-  say('Listening for the beat…'); await yieldUI();
+  const maxLen=sr*240; const sig=x.length>maxLen?x.subarray(0,maxLen):x; const N=2048, HOP=512, HB=N/2+1; const frames=Math.floor((sig.length-N)/HOP);
+  if(frames<200) throw new Error('That file is too short');
+
+  // ---- 1. STFT with harmonic/percussive separation (median filtering): notes are horizontal streaks, drums vertical ones ----
+  say('Separating notes from drums…'); await yieldUI();
   const win=new Float32Array(N); for(let i=0;i<N;i++) win[i]=.5-.5*Math.cos(2*Math.PI*i/N);
-  const flux=new Float32Array(frames), lowFlux=new Float32Array(frames), highFlux=new Float32Array(frames), midFlux=new Float32Array(frames), lowE=new Float32Array(frames), lowOn=new Float32Array(frames), chroma=[]; let prev=new Float32Array(N/2);
-  const re=new Float32Array(N), im=new Float32Array(N); const binHz=sr/N;
-  for(let f=0;f<frames;f++){ for(let i=0;i<N;i++){ re[i]=sig[f*HOP+i]*win[i]; im[i]=0; } fft(re,im);
-    const ch=new Float32Array(12); let fl=0,lf=0,hf=0,le=0,mf=0;
-    for(let k=1;k<N/2;k++){ const m0=Math.hypot(re[k],im[k]); const mag=Math.log1p(m0); const d=mag-prev[k]; const hz=k*binHz; if(hz<120) le+=m0*m0; if(d>0){ fl+=d; if(hz<150) lf+=d; else if(hz>5000) hf+=d; else if(hz>=150&&hz<2500) mf+=d; } prev[k]=mag;
-      if(hz>=250&&hz<=2000){ const pc=((Math.round(12*Math.log2(hz/440))+69)%12+12)%12; ch[pc]+=Math.exp(mag)-1; } }
-    flux[f]=fl; lowFlux[f]=lf; highFlux[f]=hf; midFlux[f]=mf; lowE[f]=le; lowOn[f]=f?Math.max(0,Math.log(le+1e-6)-Math.log(lowE[f-1]+1e-6)):0; chroma.push(ch); if(f%400===0) await yieldUI(); }
-  // sub-bass kicks (808s) swell rather than click: add their energy onsets to the low-band onset signal
+  const K=9, HALF=4; const magR=[],reR=[],imR=[]; for(let i=0;i<K;i++){ magR.push(new Float32Array(HB)); reR.push(new Float32Array(HB)); imR.push(new Float32Array(HB)); }
+  const harm=new Float32Array(sig.length), perc=new Float32Array(sig.length);
+  const lowFlux=new Float32Array(frames), midFlux=new Float32Array(frames), highFlux=new Float32Array(frames), flux=new Float32Array(frames), lowE=new Float32Array(frames), lowOn=new Float32Array(frames);
+  const chroma=[]; for(let f=0;f<frames;f++) chroma.push(null);
+  const re=new Float32Array(N), im=new Float32Array(N), re2=new Float32Array(N), im2=new Float32Array(N); const binHz=sr/N;
+  const prevP=new Float32Array(HB); const tmp=new Float32Array(K), tmpF=new Float32Array(K);
+  const med=(arr,len)=>{ for(let i=1;i<len;i++){ const v=arr[i]; let j=i-1; while(j>=0&&arr[j]>v){ arr[j+1]=arr[j]; j--; } arr[j+1]=v; } return arr[len>>1]; };
+  const ifftInto=(dst,start,srcRe,srcIm,mask)=>{ // mask applied to the half spectrum, mirrored, inverse FFT, windowed overlap-add
+    for(let k=0;k<HB;k++){ const m=mask(k); re[k]=srcRe[k]*m; im[k]=-srcIm[k]*m; } for(let k=1;k<N/2;k++){ re[N-k]=re[k]; im[N-k]=-im[k]; }
+    fft(re,im); for(let i=0;i<N;i++){ const p=start+i; if(p<dst.length) dst[p]+=re[i]/N*win[i]; } };
+  for(let f=0;f<frames;f++){
+    for(let i=0;i<N;i++){ re2[i]=sig[f*HOP+i]*win[i]; im2[i]=0; } fft(re2,im2);
+    const slot=f%K; const mg=magR[slot], rr=reR[slot], ii=imR[slot]; for(let k=0;k<HB;k++){ rr[k]=re2[k]; ii[k]=im2[k]; mg[k]=Math.hypot(re2[k],im2[k]); }
+    if(f>=K-1){ const c=f-HALF, cs=c%K; const cm=magR[cs];
+      const hmask=new Float32Array(HB); const ch=new Float32Array(12); let fl=0,lf=0,mf=0,hf=0,le=0;
+      for(let k=0;k<HB;k++){ for(let j=0;j<K;j++) tmp[j]=magR[j][k]; const H=med(tmp,K); let cnt=0; for(let j=k-HALF;j<=k+HALF;j++) tmpF[cnt++]=cm[Math.max(0,Math.min(HB-1,j))]; const P=med(tmpF,K);
+        const h2=H*H, p2=P*P; const m=h2/(h2+p2+1e-9); hmask[k]=m;
+        const hz=k*binHz; const pm=cm[k]*(1-m); const hm=cm[k]*m; const lp=Math.log1p(pm); const d=lp-prevP[k]; prevP[k]=lp;
+        if(hz<120) le+=cm[k]*cm[k]; if(d>0){ fl+=d; if(hz<150) lf+=d; else if(hz>5000) hf+=d; else if(hz<2500) mf+=d; }
+        if(hz>=250&&hz<=2000){ const pc=((Math.round(12*Math.log2(hz/440))+69)%12+12)%12; ch[pc]+=hm; } }
+      flux[c]=fl; lowFlux[c]=lf; midFlux[c]=mf; highFlux[c]=hf; lowE[c]=le; lowOn[c]=c?Math.max(0,Math.log(le+1e-6)-Math.log(lowE[c-1]+1e-6)):0; chroma[c]=ch;
+      ifftInto(harm,c*HOP,reR[cs],imR[cs],k=>hmask[k]); ifftInto(perc,c*HOP,reR[cs],imR[cs],k=>1-hmask[k]); }
+    if(f%200===0){ say('Separating notes from drums… '+Math.round(f/frames*100)+'%'); await yieldUI(); } }
+  for(let i=0;i<sig.length;i++){ harm[i]/=1.5; perc[i]/=1.5; }
+  for(let f=0;f<frames;f++) if(!chroma[f]) chroma[f]=new Float32Array(12);
+  // sub-bass kicks (808s) swell rather than click: fold their level jumps into the low-band onsets
   { let m1=0,m2=0; for(let i=0;i<frames;i++){ m1=Math.max(m1,lowFlux[i]); m2=Math.max(m2,lowOn[i]); } if(m2>0) for(let i=0;i<frames;i++) lowFlux[i]=Math.max(lowFlux[i],lowOn[i]/m2*m1); }
-  // tempo by autocorrelation of the onset envelope, 70 to 180 BPM, mild preference near 120
+
+  // ---- 2. tempo, beat phase and bar grid from the percussive onsets ----
+  say('Listening for the beat…'); await yieldUI();
   const hopS=HOP/sr; let mean=0; for(const v of flux) mean+=v; mean/=frames; const env=flux.map(v=>Math.max(0,v-mean));
   const acfAt=l=>{ l=Math.round(l); if(l<=0||l>=frames) return 0; let sum=0; for(let i=0;i<frames-l;i++) sum+=env[i]*env[i+l]; return sum; };
-  // a true beat lag also shows peaks at 2x, 3x and 4x; this stops triplet hats or dotted feels from winning
   let bestLag=0,bestV=-1; const minLag=Math.round(60/200/hopS), maxLag=Math.round(60/60/hopS); const acfCache=new Map(); const A=l=>{ if(!acfCache.has(l)) acfCache.set(l,acfAt(l)); return acfCache.get(l); };
   for(let lag=minLag;lag<=maxLag;lag++){ const score=A(lag)+A(2*lag)/2+A(3*lag)/3+A(4*lag)/4; const bpm=60/(lag*hopS); const prior=Math.exp(-Math.pow(Math.log2(bpm/120),2)/1.0); const v=score*prior; if(v>bestV){ bestV=v; bestLag=lag; } }
-  // refine lag to sub-frame precision by parabolic fit, then beat phase
   let lag=bestLag; { const a=acfAt(bestLag-1),b=acfAt(bestLag),c=acfAt(bestLag+1); const d=(a-c)/(2*(a-2*b+c)||1); if(Math.abs(d)<1) lag=bestLag+d; }
   const beatFrames=lag; let bpm=60/(beatFrames*hopS);
-  // beat phase: favour frames where the low end hits, so kicks rather than hats define the beat
   const kickness=new Float32Array(frames); let kSum=0; for(let i=0;i<frames;i++){ const share=lowFlux[i]/(lowFlux[i]+highFlux[i]+1e-9); kickness[i]=lowFlux[i]*share*share; kSum+=kickness[i]; } const envB=kSum>0?kickness:env;
   let phase=0,pv=-1; for(let o=0;o<Math.floor(beatFrames);o++){ let sum=0; for(let k=o;k<frames;k+=beatFrames){ const i=Math.round(k); sum+=envB[i]+(envB[i-1]||0)*.5+(envB[i+1]||0)*.5; } if(sum>pv){ pv=sum; phase=o; } }
-  // downbeat: which of the 4 beats carries most low-frequency energy
   let bar=0,bv=-1; for(let b=0;b<4;b++){ let sum=0; for(let k=phase+b*beatFrames;k<frames;k+=4*beatFrames){ const i=Math.round(k); sum+=lowFlux[i]||0; } if(sum>bv){ bv=sum; bar=b; } }
   const firstBeat=phase+bar*beatFrames; const beatSamples=beatFrames*HOP;
-  const SPB=bpm<100?32:16, SEC_STEPS=SPB*2; const stepSamples=beatSamples/(SPB/4); // slow songs get a 32nd-note grid so fast runs survive
+  const SPB=bpm<100?32:16; const SEC_BARS=SPB===32?2:4; const SEC_STEPS=SPB*SEC_BARS; const stepSamples=beatSamples/(SPB/4);
   const totalStepsIn=Math.floor((sig.length-firstBeat*HOP)/stepSamples); const barsIn=Math.floor(totalStepsIn/SPB);
   if(barsIn<2) throw new Error('Could not find a steady beat in that file');
-  say('Following the bass and melody… ('+Math.round(bpm)+' BPM)'); await yieldUI();
-  let notes=null; try{ const b22=ac.createBuffer(1,sig.length,sr); b22.getChannelData(0).set(sig); notes=await transcribe(b22,say); }catch(e){ console.warn('Basic Pitch unavailable, using the built-in tracker',e); }
-  // key from chroma over the whole song
-  const chSum=new Float32Array(12); if(notes&&notes.length){ for(const n of notes) chSum[((n.m%12)+12)%12]+=n.d*n.a; } else { for(const c of chroma) for(let i=0;i<12;i++) chSum[i]+=c[i]; } const key=bestKey(chSum);
-  // per-step features
-  const bassSig=biquadLP(biquadLP(sig,sr,220),sr,220); const melSig=biquadHP(biquadLP(sig,sr,3000),sr,110);
   const stepT=i=>Math.round(firstBeat*HOP+i*stepSamples);
-  const steps=[]; const WIN=2048;
-  for(let i=0;i<barsIn*SPB;i++){ const t0=stepT(i); const bw=bassSig.subarray(t0,Math.min(t0+Math.max(WIN,Math.round(stepSamples)),bassSig.length)); const mw=melSig.subarray(t0,Math.min(t0+WIN,melSig.length));
-    let be=0; for(const v of bw) be+=v*v; be=Math.sqrt(be/bw.length); let me=0; for(const v of mw) me+=v*v; me=Math.sqrt(me/mw.length);
-    const bp=be>1e-4?acfPitch(bw,sr,40,200):{midi:0,conf:0}; const mp=me>1e-4?acfPitch(mw,sr,110,2000):{midi:0,conf:0};
+
+  // ---- 3. transcription: harmonic part for melody and chords, a low-passed copy for the bass ----
+  let notesH=null, notesB=null;
+  try{
+    const bH=ac.createBuffer(1,sig.length,sr); bH.getChannelData(0).set(harm); notesH=await transcribe(bH,p=>say(p.replace('Transcribing notes','Transcribing harmony')));
+    let low=biquadLP(biquadLP(harm,sr,260),sr,260); let pk=0; for(const v of low) pk=Math.max(pk,Math.abs(v)); if(pk>0){ const g=.9/pk; for(let i=0;i<low.length;i++) low[i]*=g; }
+    const bB=ac.createBuffer(1,sig.length,sr); bB.getChannelData(0).set(low); notesB=await transcribe(bB,p=>say(p.replace('Transcribing notes','Transcribing bass')));
+  }catch(e){ console.warn('Basic Pitch unavailable, using the built-in tracker',e); notesH=null; }
+  const usedModel=!!notesH;
+
+  // ---- 4. key ----
+  const chSum=new Float32Array(12); if(notesH&&notesH.length){ for(const n of notesH) chSum[((n.m%12)+12)%12]+=n.d*n.a; } else { for(const c of chroma) for(let i=0;i<12;i++) chSum[i]+=c[i]; } const key=bestKey(chSum);
+  state.key=key.key; state.scale=key.scale; state.octave=4; keys.querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.n===state.key)); meta();
+
+  // ---- 5. per-step drum features from the percussive part; fallback pitch tracking when the model is unavailable ----
+  say('Placing the drums…'); await yieldUI();
+  const bassSig=biquadLP(biquadLP(sig,sr,220),sr,220); const melSig=biquadHP(biquadLP(harm,sr,3000),sr,110); const WIN=2048;
+  const steps=[];
+  for(let i=0;i<barsIn*SPB;i++){ const t0=stepT(i);
     const f0=Math.floor(t0/HOP), f1=Math.max(f0+1,Math.floor((t0+stepSamples)/HOP)); let lf=0,hf=0,le=0,mf=0; for(let f=f0;f<f1&&f<frames;f++){ lf=Math.max(lf,lowFlux[f]); hf=Math.max(hf,highFlux[f]); le=Math.max(le,lowE[f]); mf=Math.max(mf,midFlux[f]); }
+    let bp={midi:0,conf:0}, mp={midi:0,conf:0}, be=0, me=0;
+    if(!usedModel){ const bw=bassSig.subarray(t0,Math.min(t0+Math.max(WIN,Math.round(stepSamples)),bassSig.length)); const mw=melSig.subarray(t0,Math.min(t0+WIN,melSig.length));
+      for(const v of bw) be+=v*v; be=Math.sqrt(be/bw.length); for(const v of mw) me+=v*v; me=Math.sqrt(me/mw.length);
+      bp=be>1e-4?acfPitch(bw,sr,40,200):bp; mp=me>1e-4?acfPitch(mw,sr,110,2000):mp; }
     steps.push({be,me,bp,mp,lf,hf,le,mf}); if(i%64===0) await yieldUI(); }
   const pct=(arr,q)=>{ const a=arr.slice().sort((x,y)=>x-y); return a[Math.floor(a.length*q)]||0; };
   const maxBe=pct(steps.map(s=>s.be),.9), maxMe=pct(steps.map(s=>s.me),.9), maxLf=pct(steps.map(s=>s.lf),.95), maxHf=pct(steps.map(s=>s.hf),.95), maxMf=pct(steps.map(s=>s.mf),.95), medLe=pct(steps.map(s=>s.le),.5);
-  // apply key before mapping rows
-  state.key=key.key; state.scale=key.scale; state.octave=4; keys.querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.n===state.key)); meta();
-  say('Finding the chords…'); await yieldUI();
-  const TRI={major:[0,4,7],minor:[0,3,7]};
-  const barChords=[]; for(let b=0;b<barsIn;b++){ const c=new Float32Array(12); const f0=Math.floor(stepT(b*SPB)/HOP), f1=Math.floor(stepT(b*SPB+SPB)/HOP); for(let f=f0;f<f1&&f<chroma.length;f++) for(let i=0;i<12;i++) c[i]+=chroma[f][i];
-    let best=null; for(let r=0;r<12;r++) for(const q of ['major','minor']){ let sc=0; for(const iv of TRI[q]) sc+=c[(r+iv)%12]; sc-=.3*(c.reduce((a,v)=>a+v,0)); if(!best||sc>best.sc) best={sc,root:r,q}; } barChords.push(best); }
-  // ---- build one pattern per 2-bar section ----
-  const sections=[]; const SEC_BARS=2; const nSec=Math.floor(barsIn/SEC_BARS); const cw=W/SEC_STEPS, rh=H/14;
+
+  // ---- 6. notes to grid: continuity-based melody and bass, chords per half bar ----
+  say('Arranging…'); await yieldUI();
+  const stepS=stepSamples/sr; const nStepsAll=barsIn*SPB;
+  // which notes sound in each step (index arrays), per source
+  const perStep=(notes,minA,minD)=>{ const act=Array.from({length:nStepsAll},()=>[]); if(!notes) return act;
+    for(const n of notes){ if(n.a<minA||n.d<minD) continue; const t0=firstBeat*HOP/sr; const s0=Math.max(0,Math.floor((n.t-t0)/stepS+.3)), s1=Math.min(nStepsAll-1,Math.max(s0,Math.ceil((n.t+n.d-t0)/stepS-.3))); for(let i=s0;i<=s1;i++) act[i].push(n); }
+    // harmonic ghosts: an octave or a twelfth above a louder simultaneous note
+    for(let i=0;i<nStepsAll;i++){ const a=act[i]; act[i]=a.filter(n=>!a.some(o=>o!==n&&o.a>n.a*1.5&&((n.m-o.m)===12||(n.m-o.m)===19||(n.m-o.m)===24))); } return act; };
+  const actH=perStep(notesH,.3,.06), actB=perStep(notesB,.2,.08);
+  // Viterbi path through candidate notes: reward loudness, penalise jumps, allow silence
+  const trackLine=(act,pick,jumpCost,silence)=>{ const S=act.length; const cands=act.map(a=>pick(a)); const path=new Array(S).fill(null);
+    let prevStates=[{m:null,score:0,back:-1}]; const table=[];
+    for(let i=0;i<S;i++){ const states=[{m:null,a:0}].concat(cands[i].map(n=>({m:n.m,a:n.a}))); const cur=states.map(st=>{ let best=-1e9,bk=-1; prevStates.forEach((ps,pi)=>{ let tr=0; if(ps.m===null&&st.m!==null) tr=-silence; else if(ps.m!==null&&st.m===null) tr=-silence; else if(ps.m!==null&&st.m!==null){ const d=Math.abs(ps.m-st.m); tr=-jumpCost*d; if(d===0) tr+=.05; } const sc=ps.score+tr+(st.m!==null?st.a:-.02); if(sc>best){ best=sc; bk=pi; } }); return {m:st.m,score:best,back:bk,a:st.a}; }); table.push(cur); prevStates=cur; }
+    let bi=0; for(let k=1;k<prevStates.length;k++) if(prevStates[k].score>prevStates[bi].score) bi=k;
+    for(let i=S-1;i>=0;i--){ const st=table[i][bi]; path[i]=st.m===null?null:{m:st.m,a:st.a}; bi=st.back; } return path; };
+  const melPath=usedModel?trackLine(actH,a=>a.filter(n=>n.m>=50&&n.m<=96),.06,.15):null;
+  const bassPath=usedModel?trackLine(actB,a=>a.filter(n=>n.m>=24&&n.m<=62).map(n=>({m:n.m,a:n.a+(n.m<48?.15:0)})),.05,.12):null;
+  // chords: per half bar from the mid register, excluding the melody note
+  const TRI={major:[0,4,7],minor:[0,3,7]}; const halfSteps=SPB/2; const chordsHB=[];
+  for(let h=0;h<Math.floor(nStepsAll/halfSteps);h++){ const hist=new Float32Array(12); let tot=0;
+    for(let i=h*halfSteps;i<(h+1)*halfSteps;i++){ const a=usedModel?actH[i]:[]; for(const n of a){ if(n.m<45||n.m>84) continue; if(melPath&&melPath[i]&&melPath[i].m===n.m) continue; hist[((n.m%12)+12)%12]+=n.a; tot+=n.a; } }
+    if(!usedModel){ const f0=Math.floor(stepT(h*halfSteps)/HOP), f1=Math.floor(stepT((h+1)*halfSteps)/HOP); for(let f=f0;f<f1&&f<frames;f++) for(let k=0;k<12;k++){ hist[k]+=chroma[f][k]; tot+=chroma[f][k]; } }
+    let best=null; for(let r=0;r<12;r++) for(const q of ['major','minor']){ let sc=0; for(const iv of TRI[q]) sc+=hist[(r+iv)%12]; sc-=.25*tot; if(!best||sc>best.sc) best={sc,root:r,q,strength:tot?sc/tot:0}; }
+    chordsHB.push(tot>0&&best.strength>.15?best:null); }
+
+  // ---- 7. build one pattern per section ----
+  const sections=[]; const nSec=Math.floor(barsIn/SEC_BARS); const cw=W/SEC_STEPS, rh=H/14;
   const px=(step)=>(step+.5)/SEC_STEPS*W, py=(row)=>(row+.5)/14*H;
-  for(let sIdx=0;sIdx<nSec;sIdx++){ const st=[]; const base=sIdx*SEC_BARS*SPB; const feat=[];
-    // drums
+  const pushRuns=(st,items,color,lo,hi,hold)=>{ // items: array over section steps of {m,a} or null; merges consecutive equal rows into one stroke
+    let run=null; const flush=()=>{ if(run) st.push({color,hold,vel:Math.max(.35,Math.min(1,run.a*1.3)),pts:[{x:px(run.s0)-cw*.35,y:py(run.row)},{x:px(run.s1)+cw*.35,y:py(run.row)}]}); run=null; };
+    items.forEach((it,i)=>{ const row=it?rowForMidi(it.m,lo,hi):-1; if(run&&it&&row===run.row&&it.m===run.m){ run.s1=i; run.a=Math.max(run.a,it.a); } else { flush(); if(it) run={row,m:it.m,s0:i,s1:i,a:it.a}; } }); flush(); };
+  for(let sIdx=0;sIdx<nSec;sIdx++){ const st=[]; const base=sIdx*SEC_STEPS; const feat=[];
     for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i], l=steps[base+i-1]||{lf:0,hf:0,mf:0,le:0}, r=steps[base+i+1]||{lf:0,hf:0,mf:0};
       const on=s.lf+s.hf, onL=l.lf+l.hf, onR=r.lf+r.hf; const peak=on>=onL&&on>=onR; const lowShare=s.lf/(s.lf+s.hf+1e-9);
-      const sub=s.le>medLe*3&&s.le>(l.le||0)*1.4; // an 808 or sub kick: the low band jumps in level
+      const sub=s.le>medLe*3&&s.le>(l.le||0)*1.4;
       const kick=(peak&&s.lf>maxLf*.35&&lowShare>.12)||sub; const hat=peak&&!kick&&s.hf>maxHf*.3;
-      const snare=!kick&&s.mf>maxMf*.45&&s.mf>=l.mf&&s.mf>=r.mf&&lowShare<.5; // a mid-band crack that is not a kick
+      const snare=!kick&&s.mf>maxMf*.45&&s.mf>=l.mf&&s.mf>=r.mf&&lowShare<.5;
       if(kick) st.push({color:7,vel:Math.min(1,.55+.45*Math.min(1,s.lf/maxLf)),pts:[{x:px(i),y:py(12)+2},{x:px(i),y:py(13)+rh*.4}]});
       if(snare) st.push({color:5,vel:Math.min(1,.5+.5*Math.min(1,s.mf/maxMf)),pts:[{x:px(i),y:py(11)-rh*.3},{x:px(i),y:py(11)+rh*.3}]});
       if(hat&&!snare) st.push({color:6,vel:Math.min(1,.35+.65*Math.min(1,s.hf/maxHf)),pts:[{x:px(i),y:py(0)-rh*.3},{x:px(i),y:py(0)+rh*.3}]}); feat.push(kick?1:0,snare?1:0); }
-    if(notes){ // transcribed notes: top voice is the melody, low register the bass, the rest the chords
-      const secStart=stepT(base)/sr, secEnd=stepT(base+SEC_STEPS)/sr; const stepS=stepSamples/sr;
-      const active=Array.from({length:SEC_STEPS},()=>[]);
-      for(const n of notes){ if(n.t>=secEnd||n.t+n.d<=secStart||n.a<.3||n.d<.06) continue; const s0=Math.max(0,Math.floor((n.t-secStart)/stepS+.3)), s1=Math.min(SEC_STEPS-1,Math.max(s0,Math.ceil((n.t+n.d-secStart)/stepS-.3))); for(let i=s0;i<=s1;i++) active[i].push(n); }
-      // drop harmonic ghosts: a note an octave or a twelfth above a louder simultaneous note
-      for(let i=0;i<SEC_STEPS;i++){ const a=active[i]; active[i]=a.filter(n=>!a.some(o=>o!==n&&o.a>n.a*1.5&&((n.m-o.m)===12||(n.m-o.m)===19||(n.m-o.m)===24))); }
-      const roleRows={mel:new Map(),bass:new Map(),chord:new Map()};
-      for(let i=0;i<SEC_STEPS;i++){ const a=active[i]; if(!a.length){ feat.push(-1,-1); continue; } const byM=new Map(); for(const n of a) byM.set(n.m,Math.max(byM.get(n.m)||0,n.a)); const ms=[...byM.keys()]; const hi=Math.max(...ms), lo=Math.min(...ms);
-        const melRow=hi>=55?rowForMidi(hi,0,7):-1; const bassRow=lo<50?rowForMidi(lo,9,13):-1; feat.push(melRow,bassRow);
-        if(melRow>=0) roleRows.mel.set(i+'|'+melRow,byM.get(hi)); if(bassRow>=0) roleRows.bass.set(i+'|'+bassRow,byM.get(lo));
-        for(const m of ms){ if(m===hi&&melRow>=0) continue; if(m===lo&&bassRow>=0) continue; if(m>=48&&m<=84){ const k=i+'|'+rowForMidi(m,3,10); roleRows.chord.set(k,Math.max(roleRows.chord.get(k)||0,byM.get(m))); } } }
-      const runs=(map,color)=>{ const byRow={}; for(const [k,amp] of map){ const [i,r]=k.split('|').map(Number); (byRow[r]=byRow[r]||[]).push([i,amp]); }
-        for(const r in byRow){ const is=byRow[r].sort((a,b)=>a[0]-b[0]); let st0=is[0][0],prev=is[0][0],amp=is[0][1]; const flush=()=>st.push({color,hold:true,vel:Math.max(.35,Math.min(1,amp*1.3)),pts:[{x:px(st0)-cw*.35,y:py(+r)},{x:px(prev)+cw*.35,y:py(+r)}]}); for(let k=1;k<is.length;k++){ if(is[k][0]===prev+1){ prev=is[k][0]; amp=Math.max(amp,is[k][1]); } else { flush(); st0=is[k][0]; prev=is[k][0]; amp=is[k][1]; } } flush(); } };
-      runs(roleRows.bass,4); runs(roleRows.chord,2); runs(roleRows.mel,0);
-      sections.push({strokes:st,feat}); continue; }
-    // bass: notes held across steps with same row
-    let run=null; const flushRun=(r,color)=>{ if(r&&r.len>=1) st.push({color,pts:[{x:px(r.start)-cw*.35,y:py(r.row)},{x:px(r.start+r.len-1)+cw*.35,y:py(r.row)}]}); };
-    for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; const ok=s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0; const row=ok?rowForMidi(s.bp.midi,9,13):-1; feat.push(row);
-      if(run&&row===run.row&&ok){ run.len++; } else { flushRun(run,4); run=ok?{row,start:i,len:1}:null; } } flushRun(run,4); run=null;
-    // melody: confident, loud, and not jumping wildly
-    const mel=[]; for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; const ok=s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0; mel.push(ok?s.mp.midi:0); }
-    for(let i=0;i<SEC_STEPS;i++){ if(!mel[i]) continue; const l=mel[i-1]||mel[i], r=mel[i+1]||mel[i]; if(Math.abs(mel[i]-l)>7&&Math.abs(mel[i]-r)>7) mel[i]=0; }
-    for(let i=0;i<SEC_STEPS;i++){ const row=mel[i]?rowForMidi(mel[i],0,7):-1; feat.push(row);
-      if(run&&row===run.row&&row>=0){ run.len++; } else { flushRun(run,0); run=row>=0?{row,start:i,len:1}:null; } } flushRun(run,0); run=null;
-    // chords: purple blocks, root third fifth, one per bar, only when the bar has sustained energy
-    for(let b=0;b<SEC_BARS;b++){ const ch=barChords[sIdx*SEC_BARS+b]; if(!ch) continue; feat.push(ch.root,ch.q==='major'?1:0); for(const iv of TRI[ch.q]){ const row=rowForMidi(60+ch.root+iv,5,9); st.push({color:2,pts:[{x:px(b*SPB)-cw*.3,y:py(row)},{x:px(b*SPB+SPB-1)+cw*.3,y:py(row)}]}); } }
+    let melItems, bassItems;
+    if(usedModel){ melItems=melPath.slice(base,base+SEC_STEPS); bassItems=bassPath.slice(base,base+SEC_STEPS); }
+    else { melItems=[]; bassItems=[]; for(let i=0;i<SEC_STEPS;i++){ const s=steps[base+i]; melItems.push(s.me>maxMe*.25&&s.mp.conf>.45&&s.mp.midi>0?{m:Math.round(s.mp.midi),a:.7}:null); bassItems.push(s.be>maxBe*.2&&s.bp.conf>.35&&s.bp.midi>0?{m:Math.round(s.bp.midi),a:.7}:null); } }
+    melItems.forEach(it=>feat.push(it?it.m:-1)); bassItems.forEach(it=>feat.push(it?it.m:-1));
+    pushRuns(st,bassItems,4,9,13,true);
+    for(let h=0;h<SEC_STEPS/halfSteps;h++){ const ch=chordsHB[Math.floor(base/halfSteps)+h]; feat.push(ch?ch.root*2+(ch.q==='major'?1:0):-1); if(!ch) continue;
+      for(const iv of TRI[ch.q]){ const row=rowForMidi(60+ch.root+iv,4,9); st.push({color:2,hold:true,vel:Math.max(.4,Math.min(.9,ch.strength*1.6)),pts:[{x:px(h*halfSteps)-cw*.3,y:py(row)},{x:px((h+1)*halfSteps-1)+cw*.3,y:py(row)}]}); } }
+    pushRuns(st,melItems,0,0,7,true);
     sections.push({strokes:st,feat}); }
+
+  // ---- 8. group repeated sections, write into the app ----
   say('Grouping sections…'); await yieldUI();
-  // cluster similar sections into at most maxSlots patterns (greedy, by feature distance)
-  const maxSlots=64; const dist=(a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d+=a[i]!==b[i]?1:0; return d/a.length; };
+  const maxSlots=64; const dist=(a,b)=>{ let d=0; const L=Math.max(a.length,b.length); for(let i=0;i<L;i++) d+=a[i]!==b[i]?1:0; return d/L; };
   const reps=[]; const assign=[];
-  for(const sec of sections){ let bi=-1,bd=1; reps.forEach((r,i)=>{ const d=dist(r.feat,sec.feat); if(d<bd){ bd=d; bi=i; } }); if(bi>=0&&(bd<.12||reps.length>=maxSlots)) assign.push(bi); else { reps.push(sec); assign.push(reps.length-1); } }
+  for(const sec of sections){ let bi=-1,bd=1; reps.forEach((r,i)=>{ const d=dist(r.feat,sec.feat); if(d<bd){ bd=d; bi=i; } }); if(bi>=0&&(bd<.1||reps.length>=maxSlots)) assign.push(bi); else { reps.push(sec); assign.push(reps.length-1); } }
   const seq=[]; for(const a of assign){ if(seq.length&&seq[seq.length-1].slot===a) seq[seq.length-1].repeat++; else seq.push({slot:a,repeat:1}); }
-  // write into the app
   if(state.playing) setPlaying(false);
   state.patterns=[]; reps.forEach((r,i)=>{ state.patterns[i]=r.strokes; }); while(state.patterns.length<6) state.patterns.push([]);
-  state.stepsPerBar=SPB; state.bars=2; $('density').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.steps===SPB));
+  state.stepsPerBar=SPB; state.bars=SEC_BARS; $('density').querySelectorAll('button').forEach(x=>x.classList.toggle('on',+x.dataset.steps===SPB));
   if(state.genre!=='band') setGenre('band',false);
   setBpm(bpm); state.song={on:true,seq:seq}; $('songMode').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.m==='song'));
   state.chord='off'; syncFeel(); setSlot(0); drawGrid(); render(); meta(); renderTimeline(); $('hint').classList.add('off'); state.imported=true; importOriginal={buffer:buf,offset:firstBeat*HOP/sr}; $('origRow').hidden=false; $('origOn').classList.remove('on'); state.original=false;
-  say('Imported'+(notes?' with Basic Pitch':' with the built-in tracker')+': '+Math.round(bpm)+' BPM, '+KEYNAMES[key.key]+' '+key.scale+', '+barsIn+' bars in '+reps.length+' part'+(reps.length===1?'':'s')+'. Black ticks are the kick, pink the snare, light blue the hats, blue the bass, green the melody, purple the chords. Thicker lines are louder notes.');
+  say('Imported'+(usedModel?' with Basic Pitch':' with the built-in tracker')+': '+Math.round(bpm)+' BPM, '+KEYNAMES[key.key]+' '+key.scale+', '+barsIn+' bars in '+reps.length+' part'+(reps.length===1?'':'s')+'. Black ticks are the kick, pink the snare, light blue the hats, blue the bass, green the melody, purple the chords. Thicker lines are louder notes.');
   return reps.length; }
 $('songImport').onclick=()=>$('songFile').click();
 $('songFile').onchange=async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f) return; const b=$('songImport'); b.disabled=true;
