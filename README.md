@@ -81,7 +81,7 @@ The Export tab has a Ko-fi button and a Pro unlock. Pro removes the caption on v
 
 Song import uses [Basic Pitch](https://github.com/spotify/basic-pitch) by Spotify (Apache 2.0) running in the browser through TensorFlow.js, and the Band genre uses the FluidR3 General MIDI soundfont via [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts).
 
-Inspired by the "draw to play" sequencer concept shared by [@play_music_theory](https://www.instagram.com/play_music_theory/) and built as an open, hackable single file. Shapes, sounds and code are original.
+Inspired by the "draw to play" sequencer concept and built as an open, single file. Shapes, sounds and code are original.
 
 ## License
 
