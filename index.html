@@ -409,11 +409,11 @@ const GENRES = {
   techno:  ['stab','pluck','pad','acid','subbass','supersaw','hat','kick'],
   house:   ['organ','stab','pad','piano','subbass','chime','clap','kick'],
   dubstep: ['wobble','growl','pad','lead','subbass','laser','snare','kick'],
-  hiphop:  ['piano','bell','pad','acoustic','eightoeight','lead','snare','kick'],
+  hiphop:  ['piano','bell','pad','acoustic','eightoeight','lead','dm:tr-808:snare','dm:tr-808:kick'],
   lofi:    ['lofipiano','bell','tape','acoustic','subbass','flute','rim','softkick'],
   ambient: ['pad','bell','tape','chime','drone','flute','chime','softkick'],
   chiptune:['square','pulse','nes','arp','tribass','pulse','noise','kick'],
-  band:    ['sf:acoustic_grand_piano','sf:acoustic_guitar_nylon','sf:string_ensemble_1','sf:electric_piano_1','sf:electric_bass_finger','snare','hat','kick'],
+  band:    ['sf:acoustic_grand_piano','sf:acoustic_guitar_nylon','sf:string_ensemble_1','sf:electric_piano_1','sf:electric_bass_finger','dm:lm-2:snare','dm:lm-2:hat','dm:lm-2:kick'],
 };
 let INSTR = GENRES.pop;
 const SCALES  = {major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], dorian:[0,2,3,5,7,9,10]};
@@ -571,9 +571,10 @@ function midiDeg(deg){
 }
 function midiFor(row){ return midiDeg(ROWS-1-row); } // top row is highest
 const DRUMS=new Set(['kick','softkick','snare','clap','hat','crash','rim','noise','shaker','laser']);
+const isDrum=i=>DRUMS.has(i)||i.startsWith('dm:');
 const SUSTAIN=new Set(['pad','tape','drone','organ','flute','subbass','wobble','growl','supersaw','sf:string_ensemble_1','sf:flute','sf:electric_piano_1']);
 function chordDegs(deg,instr){
-  if(state.chord==='off'||DRUMS.has(instr)) return [deg];
+  if(state.chord==='off'||isDrum(instr)) return [deg];
   const n=SCALES[state.scale].length;
   if(state.chord==='triad') return [deg,deg+2,deg+4];
   if(state.chord==='power') return [deg,deg+4,deg+n];
@@ -590,6 +591,7 @@ function voice(instr,midi,t,opt){
   const f=hz(midi);
   const out=ac.createGain(); out.connect(master); out.connect(revSend); out.connect(dlySend);
   if(instr.startsWith('sf:')){ const h=sfPlay(instr.slice(3),Math.max(21,Math.min(108,Math.round(midi))),t,{vel,hold},out); if(h) return h; instr=SUSTAIN.has(instr)?'pad':'pluck'; }
+  if(instr.startsWith('dm:')){ const [,kit,name]=instr.split(':'); const h=kitPlay(kit,name,t,vel,out); if(h) return h; instr={kick:'kick',snare:'snare',hat:'hat',ohat:'hat',clap:'clap',crash:'crash',tom:'kick',rim:'rim'}[name]||'kick'; }
   const nodes=[];
   const osc=(type,freq,dest)=>{ const o=ac.createOscillator(); o.type=type; o.frequency.value=freq; o.connect(dest||out); nodes.push(o); return o; };
   const filt=(type,freq,q)=>{ const l=ac.createBiquadFilter(); l.type=type; l.frequency.value=freq; if(q)l.Q.value=q; l.connect(out); return l; };
@@ -685,8 +687,23 @@ function sfBuffer(name,midi){ const key=name+':'+midi; if(sfBuffers[key]) return
   const pr=(liveGraph?liveGraph.ac:ac).decodeAudioData(u8.buffer.slice(0)); pr.then(b=>{ sfDecoded[key]=b; }).catch(()=>{}); sfBuffers[key]=pr; return pr; }
 function sfWarm(name){ // decode the notes we are likely to need
   const jobs=[]; for(let m=28;m<=96;m++){ const b=sfBuffer(name,m); if(b) jobs.push(b.catch(()=>null)); } return Promise.all(jobs); }
-async function ensureSamples(genre){ const need=[...new Set(GENRES[genre].filter(x=>x.startsWith('sf:')).map(x=>x.slice(3)))].filter(n=>!sfFonts[n]); if(!need.length) return;
-  toast('Loading instruments…'); try{ audio(); await Promise.all(need.map(sfLoad)); await Promise.all(need.map(sfWarm)); toast('Instruments ready'); }catch(e){ console.error(e); toast('Instruments could not load here; using synths'); } }
+// drum machine kits: public-domain samples from the smpldsnds drum-machines collection
+const KITS={
+  'lm-2':  {base:'https://smpldsnds.github.io/drum-machines/lm-2/',   map:{kick:'kick',snare:'snare-m',hat:'hhclosed',ohat:'hhopen',clap:'clap',crash:'crash',tom:'tom-m',rim:'stick-m'}},
+  'tr-808':{base:'https://smpldsnds.github.io/drum-machines/tr-808/', map:{kick:'kick/bd0050',snare:'snare/sd0050',hat:'hihat-close/ch',ohat:'hihat-open/oh25',clap:'clap/cp',crash:'cymbal/cy2550',tom:'conga-mid/mc50',rim:'rimshot/rs'}},
+};
+const kitBuffers={};
+function kitFormat(){ const a=document.createElement('audio'); return a.canPlayType('audio/ogg; codecs=vorbis')?'ogg':'m4a'; }
+async function kitLoad(kit,name){ const key=kit+':'+name; if(kitBuffers[key]) return kitBuffers[key]; const k=KITS[kit]; if(!k||!k.map[name]) throw new Error('no sample '+key);
+  const res=await fetch(k.base+k.map[name]+'.'+kitFormat()); if(!res.ok) throw new Error('kit sample '+key); const buf=await ac.decodeAudioData(await res.arrayBuffer()); kitBuffers[key]=buf; return buf; }
+function kitPlay(kit,name,t,vel,out){ const buf=kitBuffers[kit+':'+name]; if(!buf) return null; const src=ac.createBufferSource(); src.buffer=buf; src.connect(out); out.gain.setValueAtTime(Math.min(1.2,.9*vel),t); src.start(t); src.stop(t+Math.min(buf.duration,3)+.05); return {release:()=>{}}; }
+async function ensureSamples(genre){
+  const list=GENRES[genre]; const need=[...new Set(list.filter(x=>x.startsWith('sf:')).map(x=>x.slice(3)))].filter(n=>!sfFonts[n]);
+  const kits=[...new Set(list.filter(x=>x.startsWith('dm:')).map(x=>x.slice(3)))].filter(k=>!kitBuffers[k]);
+  if(!need.length&&!kits.length) return;
+  toast('Loading instruments…'); audio();
+  try{ await Promise.all(need.map(sfLoad)); await Promise.all(need.map(sfWarm)); }catch(e){ console.error(e); toast('Instruments could not load here; using synths'); }
+  try{ await Promise.all(kits.map(k=>{ const [kit,name]=k.split(':'); return kitLoad(kit,name); })); toast('Instruments ready'); }catch(e){ console.error(e); toast('Drum samples could not load here; using synth drums'); } }
 function sfPlay(name,midi,t,opt,out){ const key=name+':'+midi; const buf=sfDecoded[key]; if(!buf){ sfBuffer(name,midi); return null; }
   const src=ac.createBufferSource(); src.buffer=buf; src.connect(out); const vel=opt.vel||1; const hold=!!opt.hold;
   out.gain.setValueAtTime(0,t); out.gain.linearRampToValueAtTime(.9*vel,t+.005);
@@ -716,7 +733,7 @@ function playStep(step,t,heldMap){
   for(const n of notes){ try{
     const instr=INSTR[n.color]; const degs=chordDegs(ROWS-1-n.row,instr);
     const v=n.vel||1;
-    if(SUSTAIN.has(instr)||(n.hold&&!DRUMS.has(instr))){ const k=n.row+'|'+n.color; seen.add(k); if(!heldMap.has(k)) heldMap.set(k,degs.map((d,i)=>voice(instr,midiDeg(d),tt,{hold:true,vel:(i?.6:1)*v}))); }
+    if(SUSTAIN.has(instr)||(n.hold&&!isDrum(instr))){ const k=n.row+'|'+n.color; seen.add(k); if(!heldMap.has(k)) heldMap.set(k,degs.map((d,i)=>voice(instr,midiDeg(d),tt,{hold:true,vel:(i?.6:1)*v}))); }
     else degs.forEach((d,i)=>voice(instr,midiDeg(d),tt,{vel:(i?.65:1)*v}));
   }catch(e){ console.error(e); } }
   for(const [k,v] of heldMap){ if(!seen.has(k)){ v.forEach(h=>h.release(tt)); heldMap.delete(k); } }
