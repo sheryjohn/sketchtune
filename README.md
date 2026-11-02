@@ -6,9 +6,9 @@ Sketchtune turns any drawing into music. A playhead sweeps across your sketch an
 
 **Try it:** https://sheryjohn.github.io/sketchtune/
 
-(docs/screenshot.png)
+![Sketchtune on desktop](docs/screenshot.png)
 
-No install, no account, no backend to run. 
+No install, no account, no backend to run. The whole app is one HTML file.
 
 ## What you can do
 
@@ -19,6 +19,8 @@ No install, no account, no backend to run.
 - **Starter sketches**: ten built-in patterns, from a steady groove to gloomy minor pieces, to learn from or remix.
 - **Share by link**: the whole sketch is packed into the URL, so anyone can open and hear it.
 - **Export** the loop as WAV, or record a portrait video with the playhead sweeping your drawing, ready for Reels or TikTok.
+- **Import a song**: pick an audio file from your device and Sketchtune transcribes it on the device with Spotify's open-source Basic Pitch model, detects tempo, key, kicks and hats, and lays the result out as a song: bass in blue, melody in green, chords in purple, drums in black and light blue. An "Original" toggle plays your recording in sync for comparison. It's a transcription, not a remix: you hear the notes played by Sketchtune's instruments, never the recording itself unless you ask.
+- **Band genre**: real sampled instruments (piano, nylon guitar, strings, electric piano, electric bass, flute) from the free FluidR3 General MIDI soundfont, loaded on demand.
 - **Gallery**: publish sketches, browse newest or most liked, play them in place, like them, and remix them with credit to the original. A daily drawing prompt rotates automatically.
 - **AI co-composer, bring your own model**: ask for "a gentle bassline under this" or "make it sadder" and the model draws new strokes. Works with Anthropic, OpenAI, Gemini, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq, OpenRouter). Your key stays in your browser; requests go straight to your provider.
 
@@ -39,7 +41,7 @@ All sounds are synthesised in the browser with the Web Audio API: oscillators, f
 
 ## Run it yourself
 
-Download `index.html` and open it, or host it anywhere static files are served (GitHub Pages, Netlify, Vercel, an S3 bucket). There is no build step and no dependency beyond a Google Font that falls back to your system font when offline.
+Host the whole folder anywhere static files are served (GitHub Pages, Netlify, Vercel, an S3 bucket). There is no build step. `index.html` is the app; `lib/` holds the Basic Pitch model (about 1 MB, loaded only when you import a song); `manifest.webmanifest`, `sw.js` and `icons/` make it installable. The Band genre fetches its samples from the jsDelivr CDN the first time it is selected. Without `lib/` the importer falls back to a simpler built-in tracker.
 
 ### Gallery setup (optional)
 
@@ -55,6 +57,16 @@ Leave the constants empty and the Gallery tab simply says it is not connected. M
 
 Open the AI tab, choose a provider, paste a key, press Test, then Save. Nothing is sent anywhere except to the provider you chose. For a local model with Ollama, set the base URL to `http://localhost:11434/v1` and start Ollama with `OLLAMA_ORIGINS` set to the site's origin so the browser is allowed to call it.
 
+## Install it as an app
+
+On the web, Sketchtune is a PWA: on a phone choose "Add to Home Screen" in the browser menu (Chrome shows an install prompt), and it works offline afterwards.
+
+An Android app with ads and a one-time Pro purchase lives in the `android` folder (a Capacitor shell around the same `index.html`). See `ANDROID.md` for the Play Store setup.
+
+## Support and Pro
+
+The Export tab has a Ko-fi button and a Pro unlock. Pro removes the caption on video exports, adds 4× and 8× loops, 4-bar patterns and six slots, and removes ads in the Android app. On the web it is sold through Lemon Squeezy with a license key; set `KOFI_URL`, `PRO_BUY_URL`, `PRO_STORE_ID` and `PRO_PRODUCT_ID` near the top of the script. In the Android app it is a Google Play in-app purchase.
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -67,7 +79,9 @@ Open the AI tab, choose a provider, paste a key, press Test, then Save. Nothing 
 
 ## Credits
 
-Inspired by the "draw to play" sequencer concept and built as an open, hackable single file. Shapes, sounds and code are original.
+Song import uses [Basic Pitch](https://github.com/spotify/basic-pitch) by Spotify (Apache 2.0) running in the browser through TensorFlow.js, and the Band genre uses the FluidR3 General MIDI soundfont via [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts).
+
+Inspired by the "draw to play" sequencer concept shared by [@play_music_theory](https://www.instagram.com/play_music_theory/) and built as an open, hackable single file. Shapes, sounds and code are original.
 
 ## License
 
