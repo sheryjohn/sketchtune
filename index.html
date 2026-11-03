@@ -1035,7 +1035,7 @@ async function llmChat(cfg,system,user,maxTokens){
   return (((j.choices||[])[0]||{}).message||{}).content||'';
 }
 function friendlyError(e){ const m=String(e&&e.message||e);
-  if(/Failed to fetch|NetworkError|Load failed|CSP|blocked/i.test(m)) return 'Blocked: this hosted preview cannot call outside APIs. Host the HTML file yourself (GitHub Pages, Netlify, Vercel) and it will work. For Ollama, allow the origin with OLLAMA_ORIGINS.';
+  if(/Failed to fetch|NetworkError|Load failed|CSP|blocked/i.test(m)) return location.hostname.endsWith('claude.ai')||location.hostname.endsWith('claudeusercontent.com')?'Blocked: this hosted preview cannot call outside APIs. Host the HTML file yourself (GitHub Pages, Netlify, Vercel) and it will work.':'The provider refused a direct call from a web page (no CORS). Route it through a relay: point the Base URL at your relay, e.g. https://your-relay.workers.dev/nvidia/v1 (see relay-worker.js in the repo). For Ollama, set OLLAMA_ORIGINS to this site.';
   if(/401|invalid.*key|authentication/i.test(m)) return 'The API key was rejected.';
   if(/429|rate/i.test(m)) return 'Rate limited by the provider. Try again in a moment.';
   return 'Error: '+m.slice(0,140); }
