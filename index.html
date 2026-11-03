@@ -1050,11 +1050,16 @@ function composerSystem(){
 Grid: x runs 0 to ${n} (columns are sequencer steps, ${state.stepsPerBar} per bar, ${state.bars} bars, played left to right at ${state.bpm} BPM). y runs 0 to ${ROWS} downward. A playhead sweeps left to right and plays every row a stroke crosses in that column, so a horizontal line repeats a note every step, a vertical tick plays one short note, and a sloped line plays a scale run.
 Pitch by row (bottom = low): row 13 = root, 11 = third, 9 = fifth, 8 = sixth, 7 = seventh, 6 = root an octave up, 4 = third up, 2 = fifth up, 0 = highest. Current key ${KEYNAMES[state.key]} ${state.scale}. Rows always snap to scale notes, so prefer long notes on rows 13, 11, 9, 6, 4, 2 and pass through the others briefly.
 Colours (index: instrument): ${INSTR.map((x,i)=>i+': '+x).join(', ')}. Genre ${GENRE_LABEL[state.genre]}. Drum instruments ignore pitch; place them low (rows 11 to 13) as short vertical ticks, kick on columns 0, 4, 8... hats on odd columns.
-Stroke format: {"c": colourIndex, "pts": [[x,y],[x,y],...]} with 2 to 24 points, x and y as numbers. Keep strokes musical: leave empty columns for rhythm, keep melodies within 6 rows, end phrases on row 13 or 6. Return 1 to 6 strokes. Do not repeat strokes that already exist.`;
+Stroke format: {"c": colourIndex, "pts": [[x,y],[x,y],...]} with 2 to 24 points, x and y as numbers. Keep strokes musical: leave empty columns for rhythm, keep melodies within 6 rows, end phrases on row 13 or 6. Return 1 to 8 strokes. Do not repeat strokes that already exist. The canvas is one loop of ${state.bars} bar${state.bars>1?'s':''}; if asked for a whole song or a length of time, write the most characteristic loop of it. Styles and genres are fine to imitate; never refuse, always return strokes.`;
 }
 function addModelStrokes(text){
-  const m=text.match(/\[[\s\S]*\]/); if(!m) throw new Error('No strokes in reply');
-  const arr=JSON.parse(m[0]); const cw=colW(), rh=rowH(); let added=0; const n=totalSteps();
+  // accept a bare array, an object with a strokes field, or either wrapped in markdown fences or prose
+  let arr=null; const clean=text.replace(/```(?:json)?/g,'').trim();
+  const tryParse=t=>{ try{ return JSON.parse(t); }catch(e){ return null; } };
+  let j=tryParse(clean); if(!j){ const m=clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/); if(m) j=tryParse(m[0]); }
+  if(Array.isArray(j)) arr=j; else if(j&&Array.isArray(j.strokes)) arr=j.strokes; else if(j&&Array.isArray(j.notes)) arr=j.notes;
+  if(!arr) throw new Error('The model replied without strokes. It said: '+clean.slice(0,160).replace(/\s+/g,' ')+(clean.length>160?'…':''));
+  const cw=colW(), rh=rowH(); let added=0; const n=totalSteps();
   for(const s of arr){ if(!s||!Array.isArray(s.pts)||s.pts.length<1) continue;
     let c=Number.isInteger(s.c)?Math.max(0,Math.min(7,s.c)):state.color;
     const pts=s.pts.filter(q=>Array.isArray(q)&&q.length>=2).map(([x,y])=>({x:Math.max(0,Math.min(n,+x))*cw,y:Math.max(0,Math.min(ROWS,+y))*rh}));
@@ -1069,7 +1074,7 @@ $('aiGo').onclick=async()=>{
   const btn=$('aiGo'); btn.classList.add('busy'); btn.disabled=true; $('aiNote').textContent='Composing…';
   try{
     const user=`Existing strokes (grid units): ${JSON.stringify(sketchForModel())}\nSelected colour: ${state.color} (${INSTR[state.color]}). Chord mode: ${state.chord}.\nRequest: ${ask}`;
-    const text=await llmChat(llm,composerSystem(),user,1500);
+    const text=await llmChat(llm,composerSystem(),user,4000);
     const k=addModelStrokes(text); $('aiNote').textContent='Added '+k+' stroke'+(k===1?'':'s')+'. Undo removes them one at a time.';
   }catch(e){ console.error(e); $('aiNote').textContent=friendlyError(e); }
   finally{ btn.classList.remove('busy'); btn.disabled=false; }
