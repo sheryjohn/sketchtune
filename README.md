@@ -20,7 +20,8 @@ No install, no account, no backend to run. The whole app is one HTML file.
 - **Share by link**: the whole sketch is packed into the URL, so anyone can open and hear it.
 - **Export** the loop as WAV, or record a portrait video with the playhead sweeping your drawing, ready for Reels or TikTok.
 - **Import a song**: pick an audio file from your device and Sketchtune transcribes it on the device with Spotify's open-source Basic Pitch model, detects tempo, key, kicks and hats, and lays the result out as a song: bass in blue, melody in green, chords in purple, drums in black and light blue. An "Original" toggle plays your recording in sync for comparison. It's a transcription, not a remix: you hear the notes played by Sketchtune's instruments, never the recording itself unless you ask.
-- **Band genre**: real sampled instruments (piano, nylon guitar, strings, electric piano, electric bass, flute) from the free FluidR3 General MIDI soundfont, loaded on demand.
+- **Band genre**: real sampled instruments (piano, nylon guitar, strings, electric piano, electric bass) from the free FluidR3 General MIDI soundfont, plus a sampled LinnDrum kit (Hip hop gets a TR-808 kit), loaded on demand. Imported songs carry note dynamics: thicker lines are louder.
+- **MIDI in and out**: export any sketch as a standard MIDI file (one track per colour, with velocities and note lengths) for a DAW or notation app, and import any MIDI file as a sketch, which is an exact rendering since MIDI is already notes.
 - **Gallery**: publish sketches, browse newest or most liked, play them in place, like them, and remix them with credit to the original. A daily drawing prompt rotates automatically.
 - **AI co-composer, bring your own model**: ask for "a gentle bassline under this" or "make it sadder" and the model draws new strokes. Works with Anthropic, OpenAI, Gemini, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq, OpenRouter). Your key stays in your browser; requests go straight to your provider.
 
@@ -79,9 +80,9 @@ The Export tab has a Ko-fi button and a Pro unlock. Pro removes the caption on v
 
 ## Credits
 
-Song import uses [Basic Pitch](https://github.com/spotify/basic-pitch) by Spotify (Apache 2.0) running in the browser through TensorFlow.js, and the Band genre uses the FluidR3 General MIDI soundfont via [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts).
+Song import uses [Basic Pitch](https://github.com/spotify/basic-pitch) by Spotify (Apache 2.0) running in the browser through TensorFlow.js, and the Band genre uses the FluidR3 General MIDI soundfont via [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts). Drum kits are public-domain samples from [smpldsnds/drum-machines](https://github.com/smpldsnds/drum-machines).
 
-Inspired by the "draw to play" sequencer concept and built as an open, single file. Shapes, sounds and code are original.
+Inspired by the "draw to play" sequencer concept shared by [@play_music_theory](https://www.instagram.com/play_music_theory/) and built as an open, hackable single file. Shapes, sounds and code are original.
 
 ## License
 
