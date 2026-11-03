@@ -328,7 +328,7 @@ input[type=range]:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
               <option value="compatible">OpenAI-compatible (Ollama, LM Studio, Groq, OpenRouter)</option>
             </select></label>
           <label class="f" id="fBase" hidden><span>Base URL</span><input id="llmBase" placeholder="http://localhost:11434/v1" autocomplete="off"></label>
-          <label class="f"><span>Model</span><input id="llmModel" autocomplete="off"></label>
+          <label class="f"><span>Model <span style="opacity:.7">(names change over time; if Test fails, use the name the error suggests)</span></span><input id="llmModel" autocomplete="off"></label>
           <label class="f"><span>API key</span><input id="llmKey" type="password" placeholder="Stays in this browser only" autocomplete="off"></label>
           <div class="row">
             <button id="llmSave" class="text on">Save</button>
@@ -997,8 +997,8 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d) retu
 const LLM_KEY='sketchtune:llm';
 const PROVIDERS={
   anthropic:{model:'claude-sonnet-5-5',base:'https://api.anthropic.com'},
-  openai:{model:'gpt-4o-mini',base:'https://api.openai.com/v1'},
-  gemini:{model:'gemini-2.0-flash',base:'https://generativelanguage.googleapis.com/v1beta'},
+  openai:{model:'gpt-6.1-terra',base:'https://api.openai.com/v1'},
+  gemini:{model:'gemini-3.8-flash',base:'https://generativelanguage.googleapis.com/v1beta'},
   compatible:{model:'llama3.1',base:'http://localhost:11434/v1'},
 };
 let llm=null;
